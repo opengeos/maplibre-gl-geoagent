@@ -20,6 +20,9 @@ map.on('load', () => {
     title: 'GeoAgent',
     collapsed: false,
     panelWidth: 430,
+    allowCodeExecutionDefault: true,
+    allowDestructiveToolsDefault: true,
+    showPermissionToggles: false,
   });
 
   map.addControl(geoAgent, 'top-left');

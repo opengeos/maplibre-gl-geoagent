@@ -41,6 +41,9 @@ function App() {
           collapsed={state.collapsed}
           panelWidth={430}
           position="top-left"
+          allowCodeExecutionDefault={true}
+          allowDestructiveToolsDefault={true}
+          showPermissionToggles={false}
           onStateChange={setState}
         />
       )}

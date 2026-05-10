@@ -7,8 +7,8 @@ const DEFAULT_STATE: GeoAgentState = {
   busy: false,
   providerId: 'openai-responses',
   modelId: 'gpt-5.5',
-  allowCodeExecution: false,
-  allowDestructiveTools: false,
+  allowCodeExecution: true,
+  allowDestructiveTools: true,
   data: {},
 };
 

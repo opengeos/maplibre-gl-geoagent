@@ -206,6 +206,10 @@
   gap: 8px;
 }
 
+.geoagent-toggle-row[hidden] {
+  display: none;
+}
+
 .geoagent-panel .geoagent-checkbox-row {
   display: inline-flex;
   grid-template-columns: none;

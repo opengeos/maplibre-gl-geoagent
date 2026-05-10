@@ -74,6 +74,7 @@ interface GeoAgentUi {
   apiKeyLabel: HTMLSpanElement;
   apiKeyInput: HTMLInputElement;
   modelIdInput: HTMLInputElement;
+  permissionRow: HTMLDivElement;
   allowCodeInput: HTMLInputElement;
   allowDestructiveInput: HTMLInputElement;
   log: HTMLDivElement;
@@ -153,8 +154,9 @@ export class GeoAgentControl implements IControl {
       className: options.className ?? '',
       defaultProvider: options.defaultProvider ?? DEFAULT_PROVIDER,
       storagePrefix: options.storagePrefix ?? DEFAULT_STORAGE_PREFIX,
-      allowCodeExecutionDefault: options.allowCodeExecutionDefault ?? false,
-      allowDestructiveToolsDefault: options.allowDestructiveToolsDefault ?? false,
+      allowCodeExecutionDefault: options.allowCodeExecutionDefault ?? true,
+      allowDestructiveToolsDefault: options.allowDestructiveToolsDefault ?? true,
+      showPermissionToggles: options.showPermissionToggles ?? false,
       defaultModel: options.defaultModel,
       basemaps: options.basemaps,
     };
@@ -462,6 +464,7 @@ export class GeoAgentControl implements IControl {
       apiKeyLabel: this.requiredElement(content, '.geoagent-api-key-label'),
       apiKeyInput: this.requiredElement(content, '.geoagent-api-key'),
       modelIdInput: this.requiredElement(content, '.geoagent-model-id'),
+      permissionRow: this.requiredElement(content, '.geoagent-toggle-row'),
       allowCodeInput: this.requiredElement(content, '.geoagent-allow-code'),
       allowDestructiveInput: this.requiredElement(content, '.geoagent-allow-destructive'),
       log: this.requiredElement(content, '.geoagent-log'),
@@ -471,6 +474,7 @@ export class GeoAgentControl implements IControl {
       clearButton: this.requiredElement(content, '.geoagent-clear'),
       closeButton,
     };
+    this.ui.permissionRow.hidden = !this.options.showPermissionToggles;
     this.populateProviderOptions();
     this.wireUiEvents();
     this.syncUiFromState();

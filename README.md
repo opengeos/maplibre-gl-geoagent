@@ -106,8 +106,9 @@ function App() {
 | `defaultProvider` | `GeoAgentProviderId` | `'openai-responses'` |
 | `defaultModel` | `string | Partial<Record<GeoAgentProviderId, string>>` | provider default |
 | `storagePrefix` | `string` | `'geoagent.maplibre'` |
-| `allowCodeExecutionDefault` | `boolean` | `false` |
-| `allowDestructiveToolsDefault` | `boolean` | `false` |
+| `allowCodeExecutionDefault` | `boolean` | `true` |
+| `allowDestructiveToolsDefault` | `boolean` | `true` |
+| `showPermissionToggles` | `boolean` | `false` |
 | `basemaps` | `Record<string, string | StyleSpecification>` | built-in basemaps |
 
 ## Browser Credentials
@@ -118,10 +119,11 @@ are sent directly from the page to the selected model provider. Use this for
 local development, trusted internal apps, or apps that intentionally expose a
 browser-compatible credential path.
 
-The `MapLibre JS` toggle exposes a tool that runs generated JavaScript in the
-page context. Leave it disabled unless the session and prompt source are trusted.
-Layer removal and clearing are also disabled until the `Layer removal` toggle is
-enabled.
+The MapLibre JavaScript tool and layer removal tools are enabled by default.
+Their checkboxes are hidden by default; pass `showPermissionToggles: true` at
+initialization time to let users turn them on or off in the panel. Disable either
+capability at startup with `allowCodeExecutionDefault: false` or
+`allowDestructiveToolsDefault: false`.
 
 ## Prompt Examples
 

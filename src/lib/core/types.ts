@@ -64,15 +64,21 @@ export interface GeoAgentControlOptions {
 
   /**
    * Whether the optional MapLibre JavaScript execution tool starts enabled.
-   * @default false
+   * @default true
    */
   allowCodeExecutionDefault?: boolean;
 
   /**
    * Whether destructive layer removal tools start enabled.
-   * @default false
+   * @default true
    */
   allowDestructiveToolsDefault?: boolean;
+
+  /**
+   * Whether to show the permission toggles in the panel.
+   * @default false
+   */
+  showPermissionToggles?: boolean;
 
   /**
    * Known basemap style IDs available to the agent.

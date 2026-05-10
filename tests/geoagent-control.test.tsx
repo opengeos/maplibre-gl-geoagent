@@ -82,13 +82,36 @@ describe('GeoAgentControl', () => {
       collapsed: true,
       panelWidth: 430,
       providerId: 'openai-responses',
-      allowCodeExecution: false,
-      allowDestructiveTools: false,
+      allowCodeExecution: true,
+      allowDestructiveTools: true,
     });
+    expect(map.mapContainer.querySelector<HTMLElement>('.geoagent-toggle-row')?.hidden).toBe(
+      true,
+    );
 
     control.onRemove();
     expect(map.mapContainer.querySelector('.geoagent-panel')).toBeNull();
     expect(container.parentNode).toBeNull();
+    map.cleanup();
+  });
+
+  it('can show permission toggles during initialization', () => {
+    const map = new MockMap();
+    const control = new GeoAgentControl({ showPermissionToggles: true });
+    const container = control.onAdd(map as never);
+    map.controlStack.appendChild(container);
+
+    expect(map.mapContainer.querySelector<HTMLElement>('.geoagent-toggle-row')?.hidden).toBe(
+      false,
+    );
+    expect(map.mapContainer.querySelector<HTMLInputElement>('.geoagent-allow-code')?.checked).toBe(
+      true,
+    );
+    expect(
+      map.mapContainer.querySelector<HTMLInputElement>('.geoagent-allow-destructive')?.checked,
+    ).toBe(true);
+
+    control.onRemove();
     map.cleanup();
   });
 
