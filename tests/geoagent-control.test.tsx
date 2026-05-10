@@ -44,16 +44,11 @@ class MockMap {
 
   addControl(control: { onAdd: (map: unknown) => HTMLElement }, _position?: string) {
     this.controls.add(control);
-    if (control.constructor.name === 'LayerControl') {
-      return;
-    }
     this.controlStack.appendChild(control.onAdd(this));
   }
 
   removeControl(control: { onRemove: () => void }) {
-    if (control.constructor.name !== 'LayerControl') {
-      control.onRemove();
-    }
+    control.onRemove();
     this.controls.delete(control);
   }
 
@@ -75,9 +70,6 @@ describe('GeoAgentControl', () => {
 
     expect(container.className).toContain('geoagent-control');
     expect(map.mapContainer.querySelector('.geoagent-panel')).toBeTruthy();
-    expect(Array.from(map.controls).some((item) => item?.constructor.name === 'LayerControl')).toBe(
-      true,
-    );
     expect(control.getState()).toMatchObject({
       collapsed: true,
       panelWidth: 390,
@@ -316,7 +308,7 @@ describe('GeoAgentControlReact', () => {
       />,
     );
 
-    expect(map.controls.size).toBe(2);
+    expect(map.controls.size).toBe(1);
     expect(map.mapContainer.querySelector('.geoagent-panel.expanded')).toBeTruthy();
 
     result.unmount();
