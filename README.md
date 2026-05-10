@@ -9,7 +9,7 @@ inspect and operate on the live map through dedicated browser tools.
 - Collapsible MapLibre control with a floating chat panel
 - Browser provider UI for OpenAI Responses, OpenAI Chat, Anthropic, and Google Gemini
 - Map tools for camera movement, projection, basemaps, markers, GeoJSON, XYZ tiles, layer visibility, opacity, feature queries, screenshots, and layer cleanup
-- Optional MapLibre JavaScript execution tool, disabled by default
+- Optional MapLibre JavaScript execution tool, enabled by default
 - Destructive layer removal tools gated behind a separate toggle
 - Copy the visible conversation log as Markdown
 - React wrapper and state hook
