@@ -1,7 +1,9 @@
 import maplibregl from 'maplibre-gl';
+import { LayerControl } from 'maplibre-gl-layer-control';
 import { GeoAgentControl } from '../../src/index';
 import '../../src/index.css';
 import 'maplibre-gl/dist/maplibre-gl.css';
+import 'maplibre-gl-layer-control/style.css';
 
 const map = new maplibregl.Map({
   container: 'map',
@@ -16,6 +18,17 @@ map.addControl(new maplibregl.NavigationControl(), 'top-right');
 map.addControl(new maplibregl.FullscreenControl(), 'top-right');
 
 map.on('load', () => {
+  map.addControl(
+    new LayerControl({
+      collapsed: true,
+      basemapStyleUrl: 'https://tiles.openfreemap.org/styles/liberty',
+      panelWidth: 320,
+      panelMinWidth: 240,
+      panelMaxWidth: 420,
+    }),
+    'top-right',
+  );
+
   const geoAgent = new GeoAgentControl({
     title: 'GeoAgent',
     collapsed: false,

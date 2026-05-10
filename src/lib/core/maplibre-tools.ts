@@ -10,7 +10,6 @@ import maplibregl, {
   type ProjectionSpecification,
   type StyleSpecification,
 } from 'maplibre-gl';
-import { LayerControl } from 'maplibre-gl-layer-control';
 import { z } from 'zod';
 
 export type JsonObject = Record<string, unknown>;
@@ -307,10 +306,6 @@ export function toJsonValue(value: unknown): JSONValue {
   }
 }
 
-function basemapStyleUrl(style: string | StyleSpecification): string | undefined {
-  return typeof style === 'string' && /^https?:\/\//.test(style) ? style : undefined;
-}
-
 export interface MapLibreAgentToolsOptions {
   basemaps?: Record<string, string | StyleSpecification>;
   allowCodeExecution: () => boolean;
@@ -323,8 +318,6 @@ export class MapLibreAgentTools {
   private readonly allowCodeExecution: () => boolean;
   private readonly allowDestructiveTools: () => boolean;
   private readonly overlays = new globalThis.Map<string, Overlay>();
-  private layerControl: LayerControl | null = null;
-  private pendingLayerControlInstallHandler: (() => void) | null = null;
 
   constructor(map: MapLibreMap, options: MapLibreAgentToolsOptions) {
     this.map = map;
@@ -334,27 +327,7 @@ export class MapLibreAgentTools {
   }
 
   destroy(): void {
-    if (this.pendingLayerControlInstallHandler) {
-      this.map.off('load', this.pendingLayerControlInstallHandler);
-      this.pendingLayerControlInstallHandler = null;
-    }
     this.clearOverlays();
-    this.removeLayerControl();
-  }
-
-  installDefaultLayerControl(): void {
-    if (this.layerControl || this.pendingLayerControlInstallHandler) {
-      return;
-    }
-    if (this.map.loaded()) {
-      this.installLayerControl();
-      return;
-    }
-    this.pendingLayerControlInstallHandler = () => {
-      this.pendingLayerControlInstallHandler = null;
-      this.installLayerControl();
-    };
-    this.map.once('load', this.pendingLayerControlInstallHandler);
   }
 
   createTools(): Tool[] {
@@ -643,11 +616,9 @@ export class MapLibreAgentTools {
       if (typeof style === 'string' && this.basemaps[style]) {
         style = this.basemaps[style];
       }
-      this.removeLayerControl();
       this.map.setStyle(style);
       await new Promise<void>((resolve) => this.map.once('style.load', () => resolve()));
       await this.restoreOverlaysAfterStyleChange();
-      this.installLayerControl(style);
       return `Basemap changed to ${rawStyle}.`;
     }
 
@@ -1083,27 +1054,6 @@ export class MapLibreAgentTools {
         this.overlays.set(overlay.name, overlay);
       }
     }
-  }
-
-  private installLayerControl(style?: string | StyleSpecification): void {
-    this.removeLayerControl();
-    const styleUrl = style ? basemapStyleUrl(style) : undefined;
-    this.layerControl = new LayerControl({
-      collapsed: true,
-      ...(styleUrl ? { basemapStyleUrl: styleUrl } : {}),
-      panelWidth: 320,
-      panelMinWidth: 240,
-      panelMaxWidth: 420,
-    });
-    this.map.addControl(this.layerControl, 'top-right');
-  }
-
-  private removeLayerControl(): void {
-    if (!this.layerControl) {
-      return;
-    }
-    this.map.removeControl(this.layerControl);
-    this.layerControl = null;
   }
 
   private requireDestructiveApproval(action: string): void {

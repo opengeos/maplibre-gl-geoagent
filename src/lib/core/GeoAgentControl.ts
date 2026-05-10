@@ -208,7 +208,6 @@ export class GeoAgentControl implements IControl {
       allowCodeExecution: () => this.state.allowCodeExecution,
       allowDestructiveTools: () => this.state.allowDestructiveTools,
     });
-    this.tools.installDefaultLayerControl();
     this.setupEventListeners();
     this.loadProviderSettings();
     this.setStatus('Ready', 'connected');

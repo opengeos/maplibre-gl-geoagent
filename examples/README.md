@@ -1,6 +1,8 @@
 # Examples
 
 This directory contains example implementations of `maplibre-gl-geoagent`.
+The examples add `maplibre-gl-layer-control` directly so the published
+GeoAgent library does not depend on that optional UI control.
 
 ## Basic Example
 

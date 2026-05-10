@@ -1,9 +1,11 @@
 import { useEffect, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import maplibregl, { type Map } from 'maplibre-gl';
+import { LayerControl } from 'maplibre-gl-layer-control';
 import { GeoAgentControlReact, useGeoAgentState } from '../../src/react';
 import '../../src/index.css';
 import 'maplibre-gl/dist/maplibre-gl.css';
+import 'maplibre-gl-layer-control/style.css';
 
 function App() {
   const mapContainer = useRef<HTMLDivElement>(null);
@@ -24,7 +26,19 @@ function App() {
 
     mapInstance.addControl(new maplibregl.NavigationControl(), 'top-right');
     mapInstance.addControl(new maplibregl.FullscreenControl(), 'top-right');
-    mapInstance.on('load', () => setMap(mapInstance));
+    mapInstance.on('load', () => {
+      mapInstance.addControl(
+        new LayerControl({
+          collapsed: true,
+          basemapStyleUrl: 'https://tiles.openfreemap.org/styles/liberty',
+          panelWidth: 320,
+          panelMinWidth: 240,
+          panelMaxWidth: 420,
+        }),
+        'top-right',
+      );
+      setMap(mapInstance);
+    });
 
     return () => {
       mapInstance.remove();
