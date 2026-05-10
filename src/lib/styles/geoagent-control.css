@@ -67,6 +67,49 @@
   gap: 12px;
 }
 
+.geoagent-panel-resize-handle {
+  position: absolute;
+  top: 44px;
+  bottom: 8px;
+  z-index: 2;
+  width: 10px;
+  cursor: ew-resize;
+  touch-action: none;
+}
+
+.geoagent-panel.resize-left .geoagent-panel-resize-handle {
+  left: -5px;
+}
+
+.geoagent-panel.resize-right .geoagent-panel-resize-handle,
+.geoagent-panel:not(.resize-left) .geoagent-panel-resize-handle {
+  right: -5px;
+}
+
+.geoagent-panel-resize-handle::before {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 3px;
+  height: 36px;
+  border-radius: 999px;
+  background: #c7d2df;
+  content: "";
+  opacity: 0;
+  transform: translate(-50%, -50%);
+  transition: opacity 0.15s ease;
+}
+
+.geoagent-panel-resize-handle:hover::before,
+.geoagent-panel.resizing .geoagent-panel-resize-handle::before {
+  opacity: 1;
+}
+
+body.geoagent-panel-resizing {
+  cursor: ew-resize;
+  user-select: none;
+}
+
 .geoagent-panel * {
   box-sizing: border-box;
 }
@@ -184,7 +227,9 @@
 
 .geoagent-panel textarea {
   min-height: 86px;
+  max-height: min(180px, 24vh);
   resize: vertical;
+  overflow: auto;
   padding: 9px 10px;
   line-height: 1.35;
 }
@@ -360,13 +405,24 @@
   vertical-align: top;
 }
 
+.geoagent-form {
+  display: grid;
+  min-height: 0;
+}
+
+.geoagent-form label {
+  min-height: 0;
+}
+
 .geoagent-actions {
   display: flex;
+  flex: 0 0 auto;
   gap: 8px;
   margin-top: 8px;
 }
 
 .geoagent-panel button.geoagent-send,
+.geoagent-panel button.geoagent-copy,
 .geoagent-panel button.geoagent-clear {
   min-height: 36px;
   padding: 0 12px;
@@ -399,5 +455,9 @@
 
   .geoagent-settings-grid {
     grid-template-columns: 1fr;
+  }
+
+  .geoagent-panel-resize-handle {
+    display: none;
   }
 }

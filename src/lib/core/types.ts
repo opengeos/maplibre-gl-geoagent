@@ -41,6 +41,18 @@ export interface GeoAgentControlOptions {
   panelWidth?: number;
 
   /**
+   * Minimum resizable panel width in pixels.
+   * @default 320
+   */
+  panelMinWidth?: number;
+
+  /**
+   * Maximum resizable panel width in pixels.
+   * @default 720
+   */
+  panelMaxWidth?: number;
+
+  /**
    * Custom CSS class name for the control button container.
    */
   className?: string;

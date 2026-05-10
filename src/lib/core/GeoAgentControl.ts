@@ -82,6 +82,8 @@ interface GeoAgentUi {
   prompt: HTMLTextAreaElement;
   sendButton: HTMLButtonElement;
   clearButton: HTMLButtonElement;
+  copyButton: HTMLButtonElement;
+  resizeHandle: HTMLDivElement;
   closeButton: HTMLButtonElement;
 }
 
@@ -124,6 +126,10 @@ function defaultModelFor(
   return defaultModel?.[providerId] ?? BASE_PROVIDER_CONFIGS[providerId].defaultModel;
 }
 
+function markdownHeading(role: string): string {
+  return role.charAt(0).toUpperCase() + role.slice(1).toLowerCase();
+}
+
 export class GeoAgentControl implements IControl {
   private readonly options: Required<
     Omit<GeoAgentControlOptions, 'defaultModel' | 'basemaps'>
@@ -144,6 +150,8 @@ export class GeoAgentControl implements IControl {
   private resizeHandler: (() => void) | null = null;
   private mapResizeHandler: (() => void) | null = null;
   private clickOutsideHandler: ((e: MouseEvent) => void) | null = null;
+  private panelResizeMoveHandler: ((e: MouseEvent) => void) | null = null;
+  private panelResizeUpHandler: (() => void) | null = null;
 
   constructor(options: GeoAgentControlOptions = {}) {
     this.options = {
@@ -151,6 +159,8 @@ export class GeoAgentControl implements IControl {
       position: options.position ?? 'top-right',
       title: options.title ?? 'GeoAgent',
       panelWidth: options.panelWidth ?? 430,
+      panelMinWidth: options.panelMinWidth ?? 320,
+      panelMaxWidth: options.panelMaxWidth ?? 720,
       className: options.className ?? '',
       defaultProvider: options.defaultProvider ?? DEFAULT_PROVIDER,
       storagePrefix: options.storagePrefix ?? DEFAULT_STORAGE_PREFIX,
@@ -163,7 +173,7 @@ export class GeoAgentControl implements IControl {
     const providerId = this.initialProviderId();
     this.state = {
       collapsed: this.options.collapsed,
-      panelWidth: this.options.panelWidth,
+      panelWidth: this.constrainPanelWidth(this.options.panelWidth),
       busy: false,
       providerId,
       modelId: this.initialModelId(providerId),
@@ -212,6 +222,7 @@ export class GeoAgentControl implements IControl {
       document.removeEventListener('click', this.clickOutsideHandler);
       this.clickOutsideHandler = null;
     }
+    this.stopPanelResize();
 
     this.tools?.destroy();
     this.tools = undefined;
@@ -246,7 +257,9 @@ export class GeoAgentControl implements IControl {
         newState.allowCodeExecution !== this.state.allowCodeExecution);
     this.state = { ...this.state, ...newState };
     if (newState.panelWidth !== undefined && this.panel) {
-      this.panel.style.width = `${newState.panelWidth}px`;
+      const panelWidth = this.constrainPanelWidth(newState.panelWidth);
+      this.state.panelWidth = panelWidth;
+      this.panel.style.width = `${panelWidth}px`;
     }
     if (collapsedChanged) {
       if (this.state.collapsed) {
@@ -383,7 +396,7 @@ export class GeoAgentControl implements IControl {
   private createPanel(): HTMLElement {
     const panel = document.createElement('div');
     panel.className = 'geoagent-panel';
-    panel.style.width = `${this.options.panelWidth}px`;
+    panel.style.width = `${this.state.panelWidth}px`;
 
     const header = document.createElement('div');
     header.className = 'geoagent-panel-header';
@@ -452,12 +465,20 @@ export class GeoAgentControl implements IControl {
         </label>
         <div class="geoagent-actions">
           <button class="geoagent-send" type="submit" disabled>Send</button>
+          <button class="geoagent-copy secondary" type="button">Copy Markdown</button>
           <button class="geoagent-clear secondary" type="button">Clear</button>
         </div>
       </form>
     `;
 
-    panel.append(header, content);
+    const resizeHandle = document.createElement('div');
+    resizeHandle.className = 'geoagent-panel-resize-handle';
+    resizeHandle.setAttribute('role', 'separator');
+    resizeHandle.setAttribute('aria-orientation', 'vertical');
+    resizeHandle.setAttribute('aria-label', 'Resize GeoAgent panel');
+    resizeHandle.addEventListener('mousedown', (event) => this.startPanelResize(event));
+
+    panel.append(header, content, resizeHandle);
     this.ui = {
       status,
       providerSelect: this.requiredElement(content, '.geoagent-provider'),
@@ -472,6 +493,8 @@ export class GeoAgentControl implements IControl {
       prompt: this.requiredElement(content, '.geoagent-prompt'),
       sendButton: this.requiredElement(content, '.geoagent-send'),
       clearButton: this.requiredElement(content, '.geoagent-clear'),
+      copyButton: this.requiredElement(content, '.geoagent-copy'),
+      resizeHandle,
       closeButton,
     };
     this.ui.permissionRow.hidden = !this.options.showPermissionToggles;
@@ -570,6 +593,9 @@ export class GeoAgentControl implements IControl {
       this.invalidateAgent();
       this.appendLog('system', 'Chat cleared.');
     });
+    ui.copyButton.addEventListener('click', () => {
+      void this.copyConversationAsMarkdown();
+    });
   }
 
   private setupEventListeners(): void {
@@ -599,6 +625,54 @@ export class GeoAgentControl implements IControl {
       }
     };
     this.map?.on('resize', this.mapResizeHandler);
+  }
+
+  private constrainPanelWidth(width: number): number {
+    return Math.max(
+      this.options.panelMinWidth,
+      Math.min(this.options.panelMaxWidth, Math.round(width)),
+    );
+  }
+
+  private startPanelResize(event: MouseEvent): void {
+    if (!this.panel) {
+      return;
+    }
+    event.preventDefault();
+    event.stopPropagation();
+
+    const position = this.getControlPosition();
+    const resizeDirection =
+      position === 'top-left' || position === 'bottom-left' ? 1 : -1;
+    const startX = event.clientX;
+    const startWidth = this.panel.getBoundingClientRect().width || this.state.panelWidth;
+
+    this.stopPanelResize();
+    this.panel.classList.add('resizing');
+    document.body.classList.add('geoagent-panel-resizing');
+
+    this.panelResizeMoveHandler = (moveEvent: MouseEvent) => {
+      moveEvent.preventDefault();
+      const nextWidth = startWidth + (moveEvent.clientX - startX) * resizeDirection;
+      this.setState({ panelWidth: nextWidth });
+    };
+    this.panelResizeUpHandler = () => this.stopPanelResize();
+
+    document.addEventListener('mousemove', this.panelResizeMoveHandler);
+    document.addEventListener('mouseup', this.panelResizeUpHandler);
+  }
+
+  private stopPanelResize(): void {
+    if (this.panelResizeMoveHandler) {
+      document.removeEventListener('mousemove', this.panelResizeMoveHandler);
+      this.panelResizeMoveHandler = null;
+    }
+    if (this.panelResizeUpHandler) {
+      document.removeEventListener('mouseup', this.panelResizeUpHandler);
+      this.panelResizeUpHandler = null;
+    }
+    this.panel?.classList.remove('resizing');
+    document.body.classList.remove('geoagent-panel-resizing');
   }
 
   private syncUiFromState(): void {
@@ -649,12 +723,14 @@ export class GeoAgentControl implements IControl {
     this.ui.status.className = `geoagent-status ${kind}`.trim();
   }
 
-  private appendLog(role: string, text: string): HTMLDivElement {
+  private appendLog(role: string, text: string, markdown = text): HTMLDivElement {
     if (!this.ui) {
       throw new Error('GeoAgent control UI is not mounted.');
     }
     const entry = document.createElement('div');
     entry.className = 'geoagent-entry';
+    entry.dataset.role = role;
+    entry.dataset.markdown = markdown;
     const roleEl = document.createElement('div');
     roleEl.className = 'geoagent-role';
     roleEl.textContent = role;
@@ -664,6 +740,7 @@ export class GeoAgentControl implements IControl {
     entry.append(roleEl, textEl);
     this.ui.log.append(entry);
     this.ui.log.scrollTop = this.ui.log.scrollHeight;
+    this.updateControls();
     return textEl;
   }
 
@@ -683,10 +760,55 @@ export class GeoAgentControl implements IControl {
   }
 
   private appendAssistantLog(markdown: string): HTMLDivElement {
-    const textEl = this.appendLog('assistant', '');
+    const textEl = this.appendLog('assistant', '', markdown);
     textEl.classList.add('markdown');
     this.renderAssistantMarkdown(textEl, markdown);
     return textEl;
+  }
+
+  private conversationMarkdown(): string {
+    if (!this.ui) {
+      return '';
+    }
+    return Array.from(this.ui.log.querySelectorAll<HTMLElement>('.geoagent-entry'))
+      .map((entry) => {
+        const role =
+          entry.dataset.role ||
+          entry.querySelector<HTMLElement>('.geoagent-role')?.textContent ||
+          'message';
+        const markdown =
+          entry.dataset.markdown ??
+          entry.querySelector<HTMLElement>('.geoagent-text')?.textContent ??
+          '';
+        return `## ${markdownHeading(role)}\n\n${markdown.trim()}`;
+      })
+      .filter((section) => section.trim().length > 0)
+      .join('\n\n');
+  }
+
+  private async copyConversationAsMarkdown(): Promise<void> {
+    const markdown = this.conversationMarkdown();
+    if (!markdown) {
+      return;
+    }
+    try {
+      if (!navigator.clipboard?.writeText) {
+        throw new Error('Clipboard API is unavailable.');
+      }
+      await navigator.clipboard.writeText(markdown);
+    } catch {
+      const textarea = document.createElement('textarea');
+      textarea.value = markdown;
+      textarea.setAttribute('readonly', '');
+      textarea.style.position = 'fixed';
+      textarea.style.opacity = '0';
+      document.body.appendChild(textarea);
+      textarea.select();
+      document.execCommand('copy');
+      textarea.remove();
+    }
+    this.setStatus('Copied', 'connected');
+    window.setTimeout(() => this.setStatus('Ready', 'connected'), 1200);
   }
 
   private updateControls(): void {
@@ -699,6 +821,7 @@ export class GeoAgentControl implements IControl {
       !this.ui.apiKeyInput.value.trim() ||
       !this.ui.modelIdInput.value.trim();
     this.ui.clearButton.disabled = this.state.busy;
+    this.ui.copyButton.disabled = this.ui.log.childElementCount === 0;
   }
 
   private invalidateAgent(): void {
@@ -790,8 +913,14 @@ export class GeoAgentControl implements IControl {
       this.streamingAssistantTextEl = this.appendAssistantLog('');
     }
     this.streamingAssistantText += text;
+    this.streamingAssistantTextEl.closest<HTMLElement>('.geoagent-entry')!.dataset.markdown =
+      this.streamingAssistantText;
     this.renderAssistantMarkdown(this.streamingAssistantTextEl, this.streamingAssistantText);
     this.ui.log.scrollTop = this.ui.log.scrollHeight;
+  }
+
+  private getStreamingAssistantElement(): HTMLDivElement | null {
+    return this.streamingAssistantTextEl;
   }
 
   private handleAgentStreamEvent(event: AgentStreamEvent): string | undefined {
@@ -841,8 +970,9 @@ export class GeoAgentControl implements IControl {
         finalAnswer = this.handleAgentStreamEvent(event) ?? finalAnswer;
       }
       const answer = finalAnswer || this.streamingAssistantText || 'Done.';
-      const assistantEl = this.streamingAssistantTextEl;
+      const assistantEl = this.getStreamingAssistantElement();
       if (assistantEl) {
+        assistantEl.closest<HTMLElement>('.geoagent-entry')!.dataset.markdown = answer;
         this.renderAssistantMarkdown(assistantEl, answer);
       } else {
         this.appendAssistantLog(answer);
@@ -883,6 +1013,7 @@ export class GeoAgentControl implements IControl {
     const buttonRect = button.getBoundingClientRect();
     const mapRect = this.mapContainer.getBoundingClientRect();
     const position = this.getControlPosition();
+    const resizeOnLeft = position === 'top-right' || position === 'bottom-right';
     const buttonTop = buttonRect.top - mapRect.top;
     const buttonBottom = mapRect.bottom - buttonRect.bottom;
     const buttonLeft = buttonRect.left - mapRect.left;
@@ -893,6 +1024,8 @@ export class GeoAgentControl implements IControl {
     this.panel.style.bottom = '';
     this.panel.style.left = '';
     this.panel.style.right = '';
+    this.panel.classList.toggle('resize-left', resizeOnLeft);
+    this.panel.classList.toggle('resize-right', !resizeOnLeft);
 
     switch (position) {
       case 'top-left':

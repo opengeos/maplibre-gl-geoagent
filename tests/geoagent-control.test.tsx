@@ -115,6 +115,58 @@ describe('GeoAgentControl', () => {
     map.cleanup();
   });
 
+  it('copies the visible conversation as markdown', async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, 'clipboard', {
+      configurable: true,
+      value: { writeText },
+    });
+    const map = new MockMap();
+    const control = new GeoAgentControl();
+    const container = control.onAdd(map as never);
+    map.controlStack.appendChild(container);
+    const copyButton = map.mapContainer.querySelector<HTMLButtonElement>('.geoagent-copy');
+
+    copyButton?.click();
+    await vi.waitFor(() => expect(writeText).toHaveBeenCalledTimes(1));
+
+    expect(writeText).toHaveBeenCalledWith(
+      '## System\n\nBrowser-only Strands MapLibre agent ready.',
+    );
+
+    control.onRemove();
+    map.cleanup();
+  });
+
+  it('resizes the panel with the drag handle and clamps width', () => {
+    const map = new MockMap();
+    const control = new GeoAgentControl({
+      panelWidth: 430,
+      panelMinWidth: 360,
+      panelMaxWidth: 500,
+    });
+    const container = control.onAdd(map as never);
+    map.controlStack.appendChild(container);
+    const handle = map.mapContainer.querySelector<HTMLElement>('.geoagent-panel-resize-handle');
+
+    handle?.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, clientX: 100 }));
+    document.dispatchEvent(new MouseEvent('mousemove', { bubbles: true, clientX: 200 }));
+
+    expect(control.getState().panelWidth).toBe(500);
+    expect(control.getPanel()?.style.width).toBe('500px');
+
+    document.dispatchEvent(new MouseEvent('mousemove', { bubbles: true, clientX: -200 }));
+
+    expect(control.getState().panelWidth).toBe(360);
+    expect(control.getPanel()?.style.width).toBe('360px');
+
+    document.dispatchEvent(new MouseEvent('mouseup', { bubbles: true }));
+    expect(document.body.classList.contains('geoagent-panel-resizing')).toBe(false);
+
+    control.onRemove();
+    map.cleanup();
+  });
+
   it('expands, collapses, emits events, and closes on outside click', () => {
     const map = new MockMap();
     const control = new GeoAgentControl();

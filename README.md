@@ -11,6 +11,7 @@ inspect and operate on the live map through dedicated browser tools.
 - Map tools for camera movement, projection, basemaps, markers, GeoJSON, XYZ tiles, layer visibility, opacity, feature queries, screenshots, and layer cleanup
 - Optional MapLibre JavaScript execution tool, disabled by default
 - Destructive layer removal tools gated behind a separate toggle
+- Copy the visible conversation log as Markdown
 - React wrapper and state hook
 
 ## Installation
@@ -102,6 +103,8 @@ function App() {
 | `position` | `'top-left' | 'top-right' | 'bottom-left' | 'bottom-right'` | `'top-right'` |
 | `title` | `string` | `'GeoAgent'` |
 | `panelWidth` | `number` | `430` |
+| `panelMinWidth` | `number` | `320` |
+| `panelMaxWidth` | `number` | `720` |
 | `className` | `string` | `''` |
 | `defaultProvider` | `GeoAgentProviderId` | `'openai-responses'` |
 | `defaultModel` | `string | Partial<Record<GeoAgentProviderId, string>>` | provider default |
