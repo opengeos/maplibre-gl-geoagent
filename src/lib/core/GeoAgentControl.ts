@@ -3,9 +3,6 @@ import {
   type AgentStreamEvent,
   type Model,
 } from '@strands-agents/sdk';
-import { AnthropicModel } from '@strands-agents/sdk/models/anthropic';
-import { GoogleModel } from '@strands-agents/sdk/models/google';
-import { OpenAIModel } from '@strands-agents/sdk/models/openai';
 import DOMPurify from 'dompurify';
 import { marked } from 'marked';
 import type { IControl, Map as MapLibreMap } from 'maplibre-gl';
@@ -185,6 +182,7 @@ export class GeoAgentControl implements IControl {
       allowCodeExecution: () => this.state.allowCodeExecution,
       allowDestructiveTools: () => this.state.allowDestructiveTools,
     });
+    this.tools.installDefaultLayerControl();
     this.setupEventListeners();
     this.loadProviderSettings();
     this.setStatus('Ready', 'connected');
@@ -240,9 +238,10 @@ export class GeoAgentControl implements IControl {
     const collapsedChanged =
       newState.collapsed !== undefined && newState.collapsed !== this.state.collapsed;
     const agentInvalidating =
-      newState.providerId !== undefined ||
-      newState.modelId !== undefined ||
-      newState.allowCodeExecution !== undefined;
+      (newState.providerId !== undefined && newState.providerId !== this.state.providerId) ||
+      (newState.modelId !== undefined && newState.modelId !== this.state.modelId) ||
+      (newState.allowCodeExecution !== undefined &&
+        newState.allowCodeExecution !== this.state.allowCodeExecution);
     this.state = { ...this.state, ...newState };
     if (newState.panelWidth !== undefined && this.panel) {
       this.panel.style.width = `${newState.panelWidth}px`;
@@ -558,7 +557,12 @@ export class GeoAgentControl implements IControl {
       }
     });
     ui.clearButton.addEventListener('click', () => {
+      if (this.state.busy) {
+        return;
+      }
       ui.log.replaceChildren();
+      this.streamingAssistantTextEl = null;
+      this.streamingAssistantText = '';
       this.invalidateAgent();
       this.appendLog('system', 'Chat cleared.');
     });
@@ -690,6 +694,7 @@ export class GeoAgentControl implements IControl {
       !this.ui.prompt.value.trim() ||
       !this.ui.apiKeyInput.value.trim() ||
       !this.ui.modelIdInput.value.trim();
+    this.ui.clearButton.disabled = this.state.busy;
   }
 
   private invalidateAgent(): void {
@@ -697,20 +702,15 @@ export class GeoAgentControl implements IControl {
     this.agentSignature = '';
   }
 
-  private createProviderModel(providerId: GeoAgentProviderId, modelId: string, apiKey: string): Model {
-    if (providerId === 'openai-responses') {
+  private async createProviderModel(
+    providerId: GeoAgentProviderId,
+    modelId: string,
+    apiKey: string,
+  ): Promise<Model> {
+    if (providerId === 'openai-responses' || providerId === 'openai-chat') {
+      const { OpenAIModel } = await import('@strands-agents/sdk/models/openai');
       return new OpenAIModel({
-        api: 'responses',
-        modelId,
-        apiKey,
-        clientConfig: {
-          dangerouslyAllowBrowser: true,
-        },
-      });
-    }
-    if (providerId === 'openai-chat') {
-      return new OpenAIModel({
-        api: 'chat',
+        api: providerId === 'openai-responses' ? 'responses' : 'chat',
         modelId,
         apiKey,
         clientConfig: {
@@ -719,6 +719,7 @@ export class GeoAgentControl implements IControl {
       });
     }
     if (providerId === 'anthropic') {
+      const { AnthropicModel } = await import('@strands-agents/sdk/models/anthropic');
       return new AnthropicModel({
         modelId,
         apiKey,
@@ -728,6 +729,7 @@ export class GeoAgentControl implements IControl {
       });
     }
     if (providerId === 'google') {
+      const { GoogleModel } = await import('@strands-agents/sdk/models/google');
       return new GoogleModel({
         modelId,
         apiKey,
@@ -736,7 +738,7 @@ export class GeoAgentControl implements IControl {
     throw new Error(`Unsupported browser provider: ${providerId}`);
   }
 
-  private getAgent(): Agent {
+  private async getAgent(): Promise<Agent> {
     if (!this.ui || !this.tools) {
       throw new Error('GeoAgent control is not mounted.');
     }
@@ -763,9 +765,10 @@ export class GeoAgentControl implements IControl {
     const systemPrompt = this.state.allowCodeExecution
       ? `${BROWSER_MAPLIBRE_SYSTEM_PROMPT}\n\n${BROWSER_MAPLIBRE_CODE_SYSTEM_PROMPT}`
       : BROWSER_MAPLIBRE_SYSTEM_PROMPT;
+    const model = await this.createProviderModel(provider.id, modelId, apiKey);
     this.agent = new Agent({
       name: 'GeoAgent MapLibre Browser',
-      model: this.createProviderModel(provider.id, modelId, apiKey),
+      model,
       systemPrompt,
       tools: this.tools.createTools(),
       printer: false,
@@ -828,7 +831,7 @@ export class GeoAgentControl implements IControl {
     this.updateControls();
     this.emit('statechange');
     try {
-      const activeAgent = this.getAgent();
+      const activeAgent = await this.getAgent();
       let finalAnswer = '';
       for await (const event of activeAgent.stream(text)) {
         finalAnswer = this.handleAgentStreamEvent(event) ?? finalAnswer;
