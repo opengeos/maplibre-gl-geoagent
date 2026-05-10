@@ -1,47 +1,31 @@
 # Examples
 
-This directory contains example implementations of the MapLibre GL Plugin Template.
+This directory contains example implementations of `maplibre-gl-geoagent`.
 
-## Available Examples
+## Basic Example
 
-### Basic Example
-A simple vanilla JavaScript/TypeScript example showing how to add the plugin control to a map.
-
-```bash
-# Run from project root
-npm run dev
-# Then navigate to http://localhost:5173/examples/basic/
-```
-
-### React Example
-A React example demonstrating the React wrapper component and hooks.
+A vanilla TypeScript example showing the `GeoAgentControl` added to a MapLibre map.
 
 ```bash
-# Run from project root
 npm run dev
-# Then navigate to http://localhost:5173/examples/react/
 ```
 
-## Running Examples
+Open <http://localhost:5173/examples/basic/>.
 
-1. Install dependencies:
-   ```bash
-   npm install
-   ```
+## React Example
 
-2. Start the development server:
-   ```bash
-   npm run dev
-   ```
+A React example demonstrating `GeoAgentControlReact` and `useGeoAgentState`.
 
-3. Open your browser and navigate to the example you want to view.
+```bash
+npm run dev
+```
 
-## Building Examples
+Open <http://localhost:5173/examples/react/>.
 
-To build all examples for deployment:
+## Build
 
 ```bash
 npm run build:examples
 ```
 
-The built examples will be in the `dist-examples` directory.
+The built examples are written to `dist-examples`.

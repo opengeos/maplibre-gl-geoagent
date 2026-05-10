@@ -1,23 +1,24 @@
-// Import styles
-import './lib/styles/plugin-control.css';
+import './lib/styles/geoagent-control.css';
 
-// Main entry point - Core exports
-export { PluginControl } from './lib/core/PluginControl';
-
-// Type exports
-export type {
-  PluginControlOptions,
-  PluginState,
-  PluginControlEvent,
-  PluginControlEventHandler,
-} from './lib/core/types';
-
-// Utility exports
+export { GeoAgentControl } from './lib/core/GeoAgentControl';
 export {
-  clamp,
-  formatNumericValue,
-  generateId,
-  debounce,
-  throttle,
-  classNames,
-} from './lib/utils';
+  DEFAULT_BASEMAPS,
+  geoJsonBounds,
+  geoJsonGeometryTypes,
+  geojsonLayerDefs,
+  geojsonLayerPaint,
+  slug,
+  toJsonValue,
+  type BBox,
+  type JsonObject,
+} from './lib/core/maplibre-tools';
+
+export type {
+  GeoAgentControlEvent,
+  GeoAgentControlEventHandler,
+  GeoAgentControlOptions,
+  GeoAgentControlReactProps,
+  GeoAgentProviderConfig,
+  GeoAgentProviderId,
+  GeoAgentState,
+} from './lib/core/types';

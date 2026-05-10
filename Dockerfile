@@ -21,8 +21,8 @@ RUN npm run build && npm run build:examples
 # Production stage
 FROM nginx:alpine
 
-# Copy built examples to nginx (served under /maplibre-gl-plugin-template/ to match Vite base path)
-COPY --from=builder /app/dist-examples /usr/share/nginx/html/maplibre-gl-plugin-template
+# Copy built examples to nginx (served under /maplibre-gl-geoagent/ to match Vite base path)
+COPY --from=builder /app/dist-examples /usr/share/nginx/html/maplibre-gl-geoagent
 
 # Copy custom nginx config
 RUN echo 'server { \
@@ -31,12 +31,12 @@ RUN echo 'server { \
     root /usr/share/nginx/html; \
     index index.html; \
     \
-    location /maplibre-gl-plugin-template/ { \
-        try_files $uri $uri/ /maplibre-gl-plugin-template/index.html; \
+    location /maplibre-gl-geoagent/ { \
+        try_files $uri $uri/ /maplibre-gl-geoagent/index.html; \
     } \
     \
     location = / { \
-        return 302 /maplibre-gl-plugin-template/; \
+        return 302 /maplibre-gl-geoagent/; \
     } \
 }' > /etc/nginx/conf.d/default.conf
 
@@ -46,13 +46,13 @@ EXPOSE 80
 RUN printf '#!/bin/sh\n\
 echo ""\n\
 echo "======================================================"\n\
-echo "  MapLibre GL Plugin Template Examples"\n\
+echo "  maplibre-gl-geoagent Examples"\n\
 echo "======================================================"\n\
 echo ""\n\
 echo "  Server running on port 80"\n\
 echo ""\n\
 echo "  If you ran: docker run -p 8080:80 ..."\n\
-echo "  Open: http://localhost:8080/maplibre-gl-plugin-template/"\n\
+echo "  Open: http://localhost:8080/maplibre-gl-geoagent/"\n\
 echo ""\n\
 echo "======================================================"\n\
 echo ""\n\
