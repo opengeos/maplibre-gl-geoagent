@@ -324,6 +324,7 @@ export class MapLibreAgentTools {
   private readonly allowDestructiveTools: () => boolean;
   private readonly overlays = new globalThis.Map<string, Overlay>();
   private layerControl: LayerControl | null = null;
+  private pendingLayerControlInstallHandler: (() => void) | null = null;
 
   constructor(map: MapLibreMap, options: MapLibreAgentToolsOptions) {
     this.map = map;
@@ -333,8 +334,27 @@ export class MapLibreAgentTools {
   }
 
   destroy(): void {
+    if (this.pendingLayerControlInstallHandler) {
+      this.map.off('load', this.pendingLayerControlInstallHandler);
+      this.pendingLayerControlInstallHandler = null;
+    }
     this.clearOverlays();
     this.removeLayerControl();
+  }
+
+  installDefaultLayerControl(): void {
+    if (this.layerControl || this.pendingLayerControlInstallHandler) {
+      return;
+    }
+    if (this.map.loaded()) {
+      this.installLayerControl();
+      return;
+    }
+    this.pendingLayerControlInstallHandler = () => {
+      this.pendingLayerControlInstallHandler = null;
+      this.installLayerControl();
+    };
+    this.map.once('load', this.pendingLayerControlInstallHandler);
   }
 
   createTools(): Tool[] {
@@ -1065,14 +1085,12 @@ export class MapLibreAgentTools {
     }
   }
 
-  private installLayerControl(style: string | StyleSpecification): void {
-    const styleUrl = basemapStyleUrl(style);
-    if (!styleUrl) {
-      return;
-    }
+  private installLayerControl(style?: string | StyleSpecification): void {
+    this.removeLayerControl();
+    const styleUrl = style ? basemapStyleUrl(style) : undefined;
     this.layerControl = new LayerControl({
       collapsed: true,
-      basemapStyleUrl: styleUrl,
+      ...(styleUrl ? { basemapStyleUrl: styleUrl } : {}),
       panelWidth: 320,
       panelMinWidth: 240,
       panelMaxWidth: 420,
