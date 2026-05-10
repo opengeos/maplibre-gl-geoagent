@@ -175,6 +175,44 @@ describe('GeoAgentControl', () => {
     map.cleanup();
   });
 
+  it('sends prompts with Enter and leaves Ctrl+Enter for new lines', async () => {
+    const map = new MockMap();
+    const control = new GeoAgentControl();
+    const container = control.onAdd(map as never);
+    map.controlStack.appendChild(container);
+    const prompt = map.mapContainer.querySelector<HTMLTextAreaElement>('.geoagent-prompt')!;
+
+    prompt.value = 'line one';
+    prompt.dispatchEvent(new Event('input', { bubbles: true }));
+    const ctrlEnterAllowed = prompt.dispatchEvent(
+      new KeyboardEvent('keydown', {
+        key: 'Enter',
+        ctrlKey: true,
+        bubbles: true,
+        cancelable: true,
+      }),
+    );
+
+    expect(ctrlEnterAllowed).toBe(false);
+    expect(prompt.value).toBe('line one\n');
+    expect(prompt.selectionStart).toBe(prompt.value.length);
+
+    const enterAllowed = prompt.dispatchEvent(
+      new KeyboardEvent('keydown', {
+        key: 'Enter',
+        bubbles: true,
+        cancelable: true,
+      }),
+    );
+
+    expect(enterAllowed).toBe(false);
+    expect(prompt.value).toBe('');
+    await vi.waitFor(() => expect(control.getState().busy).toBe(false));
+
+    control.onRemove();
+    map.cleanup();
+  });
+
   it('cycles through prompt history with up and down arrows', async () => {
     const map = new MockMap();
     const control = new GeoAgentControl();

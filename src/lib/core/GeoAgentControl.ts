@@ -626,7 +626,25 @@ export class GeoAgentControl implements IControl {
     });
     ui.prompt.addEventListener('input', () => this.updateControls());
     ui.prompt.addEventListener('keydown', (event) => {
-      if (event.key === 'Enter' && (event.ctrlKey || event.metaKey)) {
+      if (event.key === 'Enter' && event.ctrlKey && !event.isComposing) {
+        event.preventDefault();
+        ui.prompt.setRangeText(
+          '\n',
+          ui.prompt.selectionStart,
+          ui.prompt.selectionEnd,
+          'end',
+        );
+        ui.prompt.dispatchEvent(new Event('input', { bubbles: true }));
+        return;
+      }
+      if (
+        event.key === 'Enter' &&
+        !event.ctrlKey &&
+        !event.metaKey &&
+        !event.shiftKey &&
+        !event.altKey &&
+        !event.isComposing
+      ) {
         event.preventDefault();
         void this.sendPrompt();
         return;
