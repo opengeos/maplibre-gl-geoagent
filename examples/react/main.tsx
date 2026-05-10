@@ -39,7 +39,6 @@ function App() {
           map={map}
           title="GeoAgent"
           collapsed={state.collapsed}
-          panelWidth={430}
           position="top-left"
           allowCodeExecutionDefault={true}
           allowDestructiveToolsDefault={true}

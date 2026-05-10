@@ -54,6 +54,14 @@ const BASE_PROVIDER_CONFIGS: Record<
     keyPlaceholder: 'AIza...',
     defaultModel: 'gemini-3.1-pro-preview',
   },
+  bedrock: {
+    id: 'bedrock',
+    label: 'Amazon Bedrock',
+    keyLabel: 'Bedrock API Key',
+    keyPlaceholder: 'bedrock-api-key...',
+    defaultModel: 'global.anthropic.claude-sonnet-4-6',
+    defaultRegion: 'us-west-2',
+  },
 };
 
 const BROWSER_MAPLIBRE_SYSTEM_PROMPT = `You are an AI assistant embedded in a browser web app with direct access to a live MapLibre map through dedicated browser tools.
@@ -74,6 +82,8 @@ interface GeoAgentUi {
   apiKeyLabel: HTMLSpanElement;
   apiKeyInput: HTMLInputElement;
   modelIdInput: HTMLInputElement;
+  bedrockRegionLabel: HTMLLabelElement;
+  bedrockRegionInput: HTMLInputElement;
   permissionRow: HTMLDivElement;
   allowCodeInput: HTMLInputElement;
   allowDestructiveInput: HTMLInputElement;
@@ -158,7 +168,7 @@ export class GeoAgentControl implements IControl {
       collapsed: options.collapsed ?? true,
       position: options.position ?? 'top-right',
       title: options.title ?? 'GeoAgent',
-      panelWidth: options.panelWidth ?? 430,
+      panelWidth: options.panelWidth ?? 390,
       panelMinWidth: options.panelMinWidth ?? 320,
       panelMaxWidth: options.panelMaxWidth ?? 720,
       className: options.className ?? '',
@@ -177,6 +187,7 @@ export class GeoAgentControl implements IControl {
       busy: false,
       providerId,
       modelId: this.initialModelId(providerId),
+      bedrockRegion: this.initialBedrockRegion(),
       allowCodeExecution: this.options.allowCodeExecutionDefault,
       allowDestructiveTools: this.options.allowDestructiveToolsDefault,
       data: {},
@@ -332,6 +343,7 @@ export class GeoAgentControl implements IControl {
       'openai-chat': this.providerConfig('openai-chat'),
       anthropic: this.providerConfig('anthropic'),
       google: this.providerConfig('google'),
+      bedrock: this.providerConfig('bedrock'),
     };
   }
 
@@ -361,6 +373,18 @@ export class GeoAgentControl implements IControl {
 
   private modelStorageKey(providerId: GeoAgentProviderId): string {
     return `${this.options.storagePrefix}.model.${providerId}`;
+  }
+
+  private bedrockRegionStorageKey(): string {
+    return `${this.options.storagePrefix}.bedrock.region`;
+  }
+
+  private initialBedrockRegion(): string {
+    return (
+      storageGet(this.bedrockRegionStorageKey()) ||
+      BASE_PROVIDER_CONFIGS.bedrock.defaultRegion ||
+      'us-west-2'
+    );
   }
 
   private createContainer(): HTMLElement {
@@ -443,6 +467,10 @@ export class GeoAgentControl implements IControl {
           Model
           <input class="geoagent-model-id" />
         </label>
+        <label class="geoagent-bedrock-region-row" hidden>
+          Region
+          <input class="geoagent-bedrock-region" autocomplete="off" placeholder="us-west-2" />
+        </label>
       </div>
 
       <div class="geoagent-toggle-row" aria-label="Agent permissions">
@@ -461,7 +489,7 @@ export class GeoAgentControl implements IControl {
       <form class="geoagent-form">
         <label>
           Prompt
-          <textarea class="geoagent-prompt" placeholder="Add a red marker for Knoxville and zoom to it."></textarea>
+          <textarea class="geoagent-prompt" placeholder="Add a red marker for San Francisco and zoom to it."></textarea>
         </label>
         <div class="geoagent-actions">
           <button class="geoagent-send" type="submit" disabled>Send</button>
@@ -485,6 +513,8 @@ export class GeoAgentControl implements IControl {
       apiKeyLabel: this.requiredElement(content, '.geoagent-api-key-label'),
       apiKeyInput: this.requiredElement(content, '.geoagent-api-key'),
       modelIdInput: this.requiredElement(content, '.geoagent-model-id'),
+      bedrockRegionLabel: this.requiredElement(content, '.geoagent-bedrock-region-row'),
+      bedrockRegionInput: this.requiredElement(content, '.geoagent-bedrock-region'),
       permissionRow: this.requiredElement(content, '.geoagent-toggle-row'),
       allowCodeInput: this.requiredElement(content, '.geoagent-allow-code'),
       allowDestructiveInput: this.requiredElement(content, '.geoagent-allow-destructive'),
@@ -562,6 +592,18 @@ export class GeoAgentControl implements IControl {
         storageSet(this.modelStorageKey(this.state.providerId), modelId);
       } else {
         storageRemove(this.modelStorageKey(this.state.providerId));
+      }
+      this.invalidateAgent();
+      this.updateControls();
+      this.emit('statechange');
+    });
+    ui.bedrockRegionInput.addEventListener('input', () => {
+      const region = ui.bedrockRegionInput.value.trim();
+      this.state.bedrockRegion = region;
+      if (region) {
+        storageSet(this.bedrockRegionStorageKey(), region);
+      } else {
+        storageRemove(this.bedrockRegionStorageKey());
       }
       this.invalidateAgent();
       this.updateControls();
@@ -683,6 +725,8 @@ export class GeoAgentControl implements IControl {
     toggleButton?.setAttribute('aria-expanded', String(!this.state.collapsed));
     this.ui.providerSelect.value = this.state.providerId;
     this.ui.modelIdInput.value = this.state.modelId;
+    this.ui.bedrockRegionInput.value = this.state.bedrockRegion;
+    this.ui.bedrockRegionLabel.hidden = this.state.providerId !== 'bedrock';
     this.ui.allowCodeInput.checked = this.state.allowCodeExecution;
     this.ui.allowDestructiveInput.checked = this.state.allowDestructiveTools;
     this.ui.closeButton.setAttribute('aria-expanded', String(!this.state.collapsed));
@@ -713,6 +757,10 @@ export class GeoAgentControl implements IControl {
     this.ui.apiKeyInput.value = storageGet(provider.storageKey) || '';
     this.ui.modelIdInput.value = this.state.modelId;
     this.ui.modelIdInput.placeholder = provider.defaultModel;
+    this.state.bedrockRegion = this.initialBedrockRegion();
+    this.ui.bedrockRegionInput.value = this.state.bedrockRegion;
+    this.ui.bedrockRegionInput.placeholder = provider.defaultRegion || 'us-west-2';
+    this.ui.bedrockRegionLabel.hidden = provider.id !== 'bedrock';
   }
 
   private setStatus(text: string, kind = ''): void {
@@ -819,7 +867,8 @@ export class GeoAgentControl implements IControl {
       this.state.busy ||
       !this.ui.prompt.value.trim() ||
       !this.ui.apiKeyInput.value.trim() ||
-      !this.ui.modelIdInput.value.trim();
+      !this.ui.modelIdInput.value.trim() ||
+      (this.state.providerId === 'bedrock' && !this.ui.bedrockRegionInput.value.trim());
     this.ui.clearButton.disabled = this.state.busy;
     this.ui.copyButton.disabled = this.ui.log.childElementCount === 0;
   }
@@ -833,6 +882,7 @@ export class GeoAgentControl implements IControl {
     providerId: GeoAgentProviderId,
     modelId: string,
     apiKey: string,
+    bedrockRegion: string,
   ): Promise<Model> {
     if (providerId === 'openai-responses' || providerId === 'openai-chat') {
       const { OpenAIModel } = await import('@strands-agents/sdk/models/openai');
@@ -862,6 +912,14 @@ export class GeoAgentControl implements IControl {
         apiKey,
       });
     }
+    if (providerId === 'bedrock') {
+      const { BedrockModel } = await import('@strands-agents/sdk/models/bedrock');
+      return new BedrockModel({
+        region: bedrockRegion,
+        modelId,
+        apiKey,
+      });
+    }
     throw new Error(`Unsupported browser provider: ${providerId}`);
   }
 
@@ -872,16 +930,21 @@ export class GeoAgentControl implements IControl {
     const provider = this.currentProviderConfig();
     const apiKey = this.ui.apiKeyInput.value.trim();
     const modelId = this.ui.modelIdInput.value.trim();
+    const bedrockRegion = this.ui.bedrockRegionInput.value.trim();
     if (!apiKey) {
       throw new Error(`${provider.keyLabel} is required.`);
     }
     if (!modelId) {
       throw new Error('Model id is required.');
     }
+    if (provider.id === 'bedrock' && !bedrockRegion) {
+      throw new Error('Bedrock region is required.');
+    }
 
     const signature = JSON.stringify({
       providerId: provider.id,
       modelId,
+      bedrockRegion: provider.id === 'bedrock' ? bedrockRegion : '',
       apiKey,
       allowCodeExecution: this.state.allowCodeExecution,
     });
@@ -892,7 +955,7 @@ export class GeoAgentControl implements IControl {
     const systemPrompt = this.state.allowCodeExecution
       ? `${BROWSER_MAPLIBRE_SYSTEM_PROMPT}\n\n${BROWSER_MAPLIBRE_CODE_SYSTEM_PROMPT}`
       : BROWSER_MAPLIBRE_SYSTEM_PROMPT;
-    const model = await this.createProviderModel(provider.id, modelId, apiKey);
+    const model = await this.createProviderModel(provider.id, modelId, apiKey, bedrockRegion);
     this.agent = new Agent({
       name: 'GeoAgent MapLibre Browser',
       model,

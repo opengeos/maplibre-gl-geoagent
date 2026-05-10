@@ -80,7 +80,7 @@ describe('GeoAgentControl', () => {
     );
     expect(control.getState()).toMatchObject({
       collapsed: true,
-      panelWidth: 430,
+      panelWidth: 390,
       providerId: 'openai-responses',
       allowCodeExecution: true,
       allowDestructiveTools: true,
@@ -110,6 +110,43 @@ describe('GeoAgentControl', () => {
     expect(
       map.mapContainer.querySelector<HTMLInputElement>('.geoagent-allow-destructive')?.checked,
     ).toBe(true);
+
+    control.onRemove();
+    map.cleanup();
+  });
+
+  it('shows and persists the Bedrock region field for the Bedrock provider', () => {
+    const map = new MockMap();
+    const control = new GeoAgentControl({ defaultProvider: 'bedrock' });
+    const container = control.onAdd(map as never);
+    map.controlStack.appendChild(container);
+    const providerSelect = map.mapContainer.querySelector<HTMLSelectElement>('.geoagent-provider');
+    const regionRow = map.mapContainer.querySelector<HTMLLabelElement>(
+      '.geoagent-bedrock-region-row',
+    );
+    const regionInput = map.mapContainer.querySelector<HTMLInputElement>(
+      '.geoagent-bedrock-region',
+    );
+
+    expect(providerSelect?.value).toBe('bedrock');
+    expect(regionRow?.hidden).toBe(false);
+    expect(regionInput?.value).toBe('us-west-2');
+    expect(control.getState()).toMatchObject({
+      providerId: 'bedrock',
+      modelId: 'global.anthropic.claude-sonnet-4-6',
+      bedrockRegion: 'us-west-2',
+    });
+
+    regionInput!.value = 'us-east-1';
+    regionInput?.dispatchEvent(new Event('input', { bubbles: true }));
+
+    expect(control.getState().bedrockRegion).toBe('us-east-1');
+    expect(sessionStorage.getItem('geoagent.maplibre.bedrock.region')).toBe('us-east-1');
+
+    providerSelect!.value = 'openai-responses';
+    providerSelect?.dispatchEvent(new Event('change', { bubbles: true }));
+
+    expect(regionRow?.hidden).toBe(true);
 
     control.onRemove();
     map.cleanup();

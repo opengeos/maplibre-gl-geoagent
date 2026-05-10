@@ -4,7 +4,8 @@ export type GeoAgentProviderId =
   | 'openai-responses'
   | 'openai-chat'
   | 'anthropic'
-  | 'google';
+  | 'google'
+  | 'bedrock';
 
 export interface GeoAgentProviderConfig {
   id: GeoAgentProviderId;
@@ -13,6 +14,7 @@ export interface GeoAgentProviderConfig {
   keyPlaceholder: string;
   storageKey: string;
   defaultModel: string;
+  defaultRegion?: string;
 }
 
 export interface GeoAgentControlOptions {
@@ -36,7 +38,7 @@ export interface GeoAgentControlOptions {
 
   /**
    * Width of the floating panel in pixels.
-   * @default 430
+   * @default 390
    */
   panelWidth?: number;
 
@@ -104,6 +106,7 @@ export interface GeoAgentState {
   busy: boolean;
   providerId: GeoAgentProviderId;
   modelId: string;
+  bedrockRegion: string;
   allowCodeExecution: boolean;
   allowDestructiveTools: boolean;
   data?: Record<string, unknown>;

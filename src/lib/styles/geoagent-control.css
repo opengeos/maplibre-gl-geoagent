@@ -241,8 +241,16 @@ body.geoagent-panel-resizing {
   align-items: end;
 }
 
-.geoagent-settings-grid label:last-child {
+.geoagent-settings-grid label:nth-child(3) {
   grid-column: 1 / -1;
+}
+
+.geoagent-settings-grid:has(.geoagent-bedrock-region-row:not([hidden])) label:nth-child(3) {
+  grid-column: auto;
+}
+
+.geoagent-bedrock-region-row[hidden] {
+  display: none;
 }
 
 .geoagent-toggle-row {

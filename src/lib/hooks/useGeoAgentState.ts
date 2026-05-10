@@ -3,10 +3,11 @@ import type { GeoAgentProviderId, GeoAgentState } from '../core/types';
 
 const DEFAULT_STATE: GeoAgentState = {
   collapsed: true,
-  panelWidth: 430,
+  panelWidth: 390,
   busy: false,
   providerId: 'openai-responses',
   modelId: 'gpt-5.5',
+  bedrockRegion: 'us-west-2',
   allowCodeExecution: true,
   allowDestructiveTools: true,
   data: {},

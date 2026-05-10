@@ -19,7 +19,6 @@ map.on('load', () => {
   const geoAgent = new GeoAgentControl({
     title: 'GeoAgent',
     collapsed: false,
-    panelWidth: 430,
     allowCodeExecutionDefault: true,
     allowDestructiveToolsDefault: true,
     showPermissionToggles: false,
