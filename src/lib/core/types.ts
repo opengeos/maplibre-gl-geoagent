@@ -1,80 +1,125 @@
-import type { Map } from 'maplibre-gl';
+import type { Map, StyleSpecification } from 'maplibre-gl';
 
-/**
- * Options for configuring the PluginControl
- */
-export interface PluginControlOptions {
+export type GeoAgentProviderId =
+  | 'openai-responses'
+  | 'openai-chat'
+  | 'anthropic'
+  | 'google'
+  | 'bedrock';
+
+export interface GeoAgentProviderConfig {
+  id: GeoAgentProviderId;
+  label: string;
+  keyLabel: string;
+  keyPlaceholder: string;
+  storageKey: string;
+  defaultModel: string;
+  defaultRegion?: string;
+}
+
+export interface GeoAgentControlOptions {
   /**
-   * Whether the control panel should start collapsed (showing only the toggle button)
+   * Whether the panel should start collapsed.
    * @default true
    */
   collapsed?: boolean;
 
   /**
-   * Position of the control on the map
+   * Position of the control button on the map.
    * @default 'top-right'
    */
   position?: 'top-left' | 'top-right' | 'bottom-left' | 'bottom-right';
 
   /**
-   * Title displayed in the control header
-   * @default 'Plugin Control'
+   * Title displayed in the control header.
+   * @default 'GeoAgent'
    */
   title?: string;
 
   /**
-   * Width of the control panel in pixels
-   * @default 300
+   * Width of the floating panel in pixels.
+   * @default 390
    */
   panelWidth?: number;
 
   /**
-   * Custom CSS class name for the control container
+   * Minimum resizable panel width in pixels.
+   * @default 320
+   */
+  panelMinWidth?: number;
+
+  /**
+   * Maximum resizable panel width in pixels.
+   * @default 720
+   */
+  panelMaxWidth?: number;
+
+  /**
+   * Custom CSS class name for the control button container.
    */
   className?: string;
+
+  /**
+   * Initial provider when there is no stored provider preference.
+   * @default 'openai-responses'
+   */
+  defaultProvider?: GeoAgentProviderId;
+
+  /**
+   * Override the default model for all providers or selected providers.
+   */
+  defaultModel?: string | Partial<Record<GeoAgentProviderId, string>>;
+
+  /**
+   * Prefix for sessionStorage keys.
+   * @default 'geoagent.maplibre'
+   */
+  storagePrefix?: string;
+
+  /**
+   * Whether the optional MapLibre JavaScript execution tool starts enabled.
+   * @default true
+   */
+  allowCodeExecutionDefault?: boolean;
+
+  /**
+   * Whether destructive layer removal tools start enabled.
+   * @default true
+   */
+  allowDestructiveToolsDefault?: boolean;
+
+  /**
+   * Whether to show the permission toggles in the panel.
+   * @default false
+   */
+  showPermissionToggles?: boolean;
+
+  /**
+   * Known basemap style IDs available to the agent.
+   */
+  basemaps?: Record<string, string | StyleSpecification>;
 }
 
-/**
- * Internal state of the plugin control
- */
-export interface PluginState {
-  /**
-   * Whether the control panel is currently collapsed
-   */
+export interface GeoAgentState {
   collapsed: boolean;
-
-  /**
-   * Current panel width in pixels
-   */
   panelWidth: number;
-
-  /**
-   * Any custom state data
-   */
+  busy: boolean;
+  providerId: GeoAgentProviderId;
+  modelId: string;
+  bedrockRegion: string;
+  allowCodeExecution: boolean;
+  allowDestructiveTools: boolean;
   data?: Record<string, unknown>;
 }
 
-/**
- * Props for the React wrapper component
- */
-export interface PluginControlReactProps extends PluginControlOptions {
-  /**
-   * MapLibre GL map instance
-   */
+export interface GeoAgentControlReactProps extends GeoAgentControlOptions {
   map: Map;
-
-  /**
-   * Callback fired when the control state changes
-   */
-  onStateChange?: (state: PluginState) => void;
+  onStateChange?: (state: GeoAgentState) => void;
 }
 
-/**
- * Event types emitted by the plugin control
- */
-export type PluginControlEvent = 'collapse' | 'expand' | 'statechange';
+export type GeoAgentControlEvent = 'collapse' | 'expand' | 'statechange';
 
-/**
- * Event handler function type
- */
-export type PluginControlEventHandler = (event: { type: PluginControlEvent; state: PluginState }) => void;
+export type GeoAgentControlEventHandler = (event: {
+  type: GeoAgentControlEvent;
+  state: GeoAgentState;
+}) => void;

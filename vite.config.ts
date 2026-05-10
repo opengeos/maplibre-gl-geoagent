@@ -23,7 +23,7 @@ export default defineConfig({
         index: resolve(__dirname, 'src/index.ts'),
         react: resolve(__dirname, 'src/react.ts'),
       },
-      name: 'MapLibrePluginTemplate',
+      name: 'MapLibreGeoAgent',
       formats: ['es', 'cjs'],
       fileName: (format, entryName) => {
         const ext = format === 'es' ? 'mjs' : 'cjs';
@@ -39,7 +39,7 @@ export default defineConfig({
           'maplibre-gl': 'maplibregl',
         },
         assetFileNames: (assetInfo) => {
-          if (assetInfo.name === 'style.css') return 'maplibre-gl-plugin-template.css';
+          if (assetInfo.name === 'style.css') return 'maplibre-gl-geoagent.css';
           return assetInfo.name || '';
         },
       },

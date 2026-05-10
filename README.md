@@ -1,266 +1,189 @@
-# MapLibre GL Plugin Template
+# maplibre-gl-geoagent
 
-A template for creating MapLibre GL JS plugins with TypeScript and React support.
-
-[![npm version](https://img.shields.io/npm/v/maplibre-gl-plugin-template.svg)](https://www.npmjs.com/package/maplibre-gl-plugin-template)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Open in CodeSandbox](https://img.shields.io/badge/Open%20in-CodeSandbox-blue?logo=codesandbox)](https://codesandbox.io/p/github/opengeos/maplibre-gl-plugin-template)
-[![Open in StackBlitz](https://img.shields.io/badge/Open%20in-StackBlitz-blue?logo=stackblitz)](https://stackblitz.com/github/opengeos/maplibre-gl-plugin-template)
+A browser-only GeoAgent control for MapLibre GL JS. The control implements
+MapLibre's `IControl` interface and embeds a Strands TypeScript agent that can
+inspect and operate on the live map through dedicated browser tools.
 
 ## Features
 
-- **TypeScript Support** - Full TypeScript support with type definitions
-- **React Integration** - React wrapper component and custom hooks
-- **IControl Implementation** - Implements MapLibre's IControl interface
-- **Modern Build Setup** - Vite-based build with dual ESM/CJS output
-- **Testing** - Vitest setup with React Testing Library
-- **CI/CD Ready** - GitHub Actions for npm publishing and GitHub Pages
+- Collapsible MapLibre control with a floating chat panel
+- Browser provider UI for OpenAI Responses, OpenAI Chat, Anthropic, Google Gemini, and Amazon Bedrock
+- Map tools for camera movement, projection, basemaps, markers, GeoJSON, XYZ tiles, layer visibility, opacity, feature queries, screenshots, and layer cleanup
+- Optional MapLibre JavaScript execution tool, disabled by default
+- Destructive layer removal tools gated behind a separate toggle
+- Copy the visible conversation log as Markdown
+- React wrapper and state hook
 
 ## Installation
 
 ```bash
-npm install maplibre-gl-plugin-template
+npm install maplibre-gl-geoagent maplibre-gl
 ```
 
-## Quick Start
-
-### Vanilla JavaScript/TypeScript
+## Vanilla Usage
 
 ```typescript
-import maplibregl from 'maplibre-gl';
-import { PluginControl } from 'maplibre-gl-plugin-template';
-import 'maplibre-gl-plugin-template/style.css';
+import maplibregl from "maplibre-gl";
+import { GeoAgentControl } from "maplibre-gl-geoagent";
+import "maplibre-gl/dist/maplibre-gl.css";
+import "maplibre-gl-geoagent/style.css";
 
 const map = new maplibregl.Map({
-  container: 'map',
-  style: 'https://demotiles.maplibre.org/style.json',
-  center: [0, 0],
-  zoom: 2,
+  container: "map",
+  style: "https://tiles.openfreemap.org/styles/liberty",
+  center: [-98.5795, 39.8283],
+  zoom: 3,
+  maxPitch: 85,
+  canvasContextAttributes: { preserveDrawingBuffer: true },
 });
 
-map.on('load', () => {
-  const control = new PluginControl({
-    title: 'My Plugin',
-    collapsed: false,
-    panelWidth: 300,
-  });
-
-  map.addControl(control, 'top-right');
+map.on("load", () => {
+  map.addControl(
+    new GeoAgentControl({
+      title: "GeoAgent",
+      collapsed: false,
+    }),
+    "top-left",
+  );
 });
 ```
 
-### React
+## React Usage
 
 ```tsx
-import { useEffect, useRef, useState } from 'react';
-import maplibregl, { Map } from 'maplibre-gl';
-import { PluginControlReact, usePluginState } from 'maplibre-gl-plugin-template/react';
-import 'maplibre-gl-plugin-template/style.css';
+import { useEffect, useRef, useState } from "react";
+import maplibregl, { type Map } from "maplibre-gl";
+import {
+  GeoAgentControlReact,
+  useGeoAgentState,
+} from "maplibre-gl-geoagent/react";
+import "maplibre-gl/dist/maplibre-gl.css";
+import "maplibre-gl-geoagent/style.css";
 
 function App() {
   const mapContainer = useRef<HTMLDivElement>(null);
   const [map, setMap] = useState<Map | null>(null);
-  const { state, toggle } = usePluginState();
+  const { state, setState } = useGeoAgentState({ collapsed: false });
 
   useEffect(() => {
     if (!mapContainer.current) return;
 
     const mapInstance = new maplibregl.Map({
       container: mapContainer.current,
-      style: 'https://demotiles.maplibre.org/style.json',
-      center: [0, 0],
-      zoom: 2,
+      style: "https://tiles.openfreemap.org/styles/liberty",
+      center: [-98.5795, 39.8283],
+      zoom: 3,
+      canvasContextAttributes: { preserveDrawingBuffer: true },
     });
 
-    mapInstance.on('load', () => setMap(mapInstance));
-
+    mapInstance.on("load", () => setMap(mapInstance));
     return () => mapInstance.remove();
   }, []);
 
   return (
-    <div style={{ width: '100%', height: '100vh' }}>
-      <div ref={mapContainer} style={{ width: '100%', height: '100%' }} />
+    <>
+      <div ref={mapContainer} style={{ width: "100vw", height: "100vh" }} />
       {map && (
-        <PluginControlReact
+        <GeoAgentControlReact
           map={map}
-          title="My Plugin"
+          title="GeoAgent"
           collapsed={state.collapsed}
-          onStateChange={(newState) => console.log(newState)}
+          position="top-left"
+          onStateChange={setState}
         />
       )}
-    </div>
+    </>
   );
 }
 ```
 
-## API
+## Providers
 
-### PluginControl
+Supported providers:
 
-The main control class implementing MapLibre's `IControl` interface.
+- OpenAI Responses
+- OpenAI Chat
+- Anthropic
+- Google Gemini
+- Amazon Bedrock
 
-#### Constructor Options
+For Bedrock, select `Amazon Bedrock`, enter a Bedrock API key, choose a Bedrock
+Converse model ID, and set the AWS region. The default Bedrock model is
+`global.anthropic.claude-sonnet-4-6`, and the default region is `us-west-2`.
 
-| Option | Type | Default | Description |
-|--------|------|---------|-------------|
-| `collapsed` | `boolean` | `true` | Whether the panel starts collapsed (showing only the 29x29 toggle button) |
-| `position` | `string` | `'top-right'` | Control position on the map |
-| `title` | `string` | `'Plugin Control'` | Title displayed in the header |
-| `panelWidth` | `number` | `300` | Width of the dropdown panel in pixels |
-| `className` | `string` | `''` | Custom CSS class name |
+## Options
 
-#### Methods
+| Option | Type | Default |
+| --- | --- | --- |
+| `collapsed` | `boolean` | `true` |
+| `position` | `'top-left' \| 'top-right' \| 'bottom-left' \| 'bottom-right'` | `'top-right'` |
+| `title` | `string` | `'GeoAgent'` |
+| `panelWidth` | `number` | `390` |
+| `panelMinWidth` | `number` | `320` |
+| `panelMaxWidth` | `number` | `720` |
+| `className` | `string` | `''` |
+| `defaultProvider` | `GeoAgentProviderId` | `'openai-responses'` |
+| `defaultModel` | `string \| Partial<Record<GeoAgentProviderId, string>>` | provider default |
+| `storagePrefix` | `string` | `'geoagent.maplibre'` |
+| `allowCodeExecutionDefault` | `boolean` | `true` |
+| `allowDestructiveToolsDefault` | `boolean` | `true` |
+| `showPermissionToggles` | `boolean` | `false` |
+| `basemaps` | `Record<string, string \| StyleSpecification>` | built-in basemaps |
 
-- `toggle()` - Toggle the collapsed state
-- `expand()` - Expand the panel
-- `collapse()` - Collapse the panel
-- `getState()` - Get the current state
-- `setState(state)` - Update the state
-- `on(event, handler)` - Register an event handler
-- `off(event, handler)` - Remove an event handler
-- `getMap()` - Get the map instance
-- `getContainer()` - Get the container element
+## Browser Credentials
 
-#### Events
+This package runs model SDKs directly in the browser. API keys entered in the
+panel are stored in `sessionStorage` under the configured `storagePrefix` and
+are sent directly from the page to the selected model provider. Use this for
+local development, trusted internal apps, or apps that intentionally expose a
+browser-compatible credential path.
 
-- `collapse` - Fired when the panel is collapsed
-- `expand` - Fired when the panel is expanded
-- `statechange` - Fired when the state changes
+For Amazon Bedrock, this browser-only control uses Bedrock API-key bearer-token
+authentication. Do not enter AWS access key IDs, secret access keys, or session
+tokens in this UI. For production Bedrock deployments, prefer a backend proxy
+that calls Bedrock with IAM role credentials.
 
-### PluginControlReact
+The MapLibre JavaScript tool and layer removal tools are enabled by default.
+Their checkboxes are hidden by default; pass `showPermissionToggles: true` at
+initialization time to let users turn them on or off in the panel. Disable either
+capability at startup with `allowCodeExecutionDefault: false` or
+`allowDestructiveToolsDefault: false`.
 
-React wrapper component for `PluginControl`.
+## Prompt Examples
 
-#### Props
-
-All `PluginControl` options plus:
-
-| Prop | Type | Description |
-|------|------|-------------|
-| `map` | `Map` | MapLibre GL map instance (required) |
-| `onStateChange` | `function` | Callback fired when state changes |
-
-### usePluginState
-
-Custom React hook for managing plugin state.
-
-```typescript
-const {
-  state,        // Current state
-  setState,     // Update entire state
-  setCollapsed, // Set collapsed state
-  setPanelWidth,// Set panel width
-  setData,      // Set custom data
-  reset,        // Reset to initial state
-  toggle,       // Toggle collapsed state
-} = usePluginState(initialState);
+```text
+Add a red marker for San Francisco and zoom to it.
 ```
 
-## Utilities
+```text
+Change the basemap to dark, then get the current map state.
+```
 
-The package exports several utility functions:
+```text
+Add the GeoJSON URL https://raw.githubusercontent.com/plotly/datasets/master/geojson-counties-fips.json as US counties.
+```
 
-- `clamp(value, min, max)` - Clamp a value between min and max
-- `formatNumericValue(value, step)` - Format a number with appropriate decimals
-- `generateId(prefix?)` - Generate a unique ID
-- `debounce(fn, delay)` - Debounce a function
-- `throttle(fn, limit)` - Throttle a function
-- `classNames(classes)` - Build a class string from an object
+```text
+Hide the US counties layer, then show it again.
+```
+
+```text
+What features are visible at the center of the current map?
+```
+
+## API
+
+- `GeoAgentControl` implements MapLibre `IControl`
+- `GeoAgentControlReact` mounts and unmounts the control for React apps
+- `useGeoAgentState` provides a small React state helper
+- Types are exported for control options, state, providers, events, and React props
 
 ## Development
 
-### Setup
-
 ```bash
-# Clone the repository
-git clone https://github.com/your-username/maplibre-gl-plugin-template.git
-cd maplibre-gl-plugin-template
-
-# Install dependencies
 npm install
-
-# Start development server
 npm run dev
+npm test
+npm run build
+npm run build:examples
 ```
-
-### Scripts
-
-| Script | Description |
-|--------|-------------|
-| `npm run dev` | Start development server |
-| `npm run build` | Build the library |
-| `npm run build:examples` | Build examples for deployment |
-| `npm run test` | Run tests |
-| `npm run test:ui` | Run tests with UI |
-| `npm run test:coverage` | Run tests with coverage |
-| `npm run lint` | Lint the code |
-| `npm run format` | Format the code |
-
-### Project Structure
-
-```
-maplibre-gl-plugin-template/
-├── src/
-│   ├── index.ts              # Main entry point
-│   ├── react.ts              # React entry point
-│   ├── index.css             # Root styles
-│   └── lib/
-│       ├── core/             # Core classes and types
-│       ├── hooks/            # React hooks
-│       ├── utils/            # Utility functions
-│       └── styles/           # Component styles
-├── tests/                    # Test files
-├── examples/                 # Example applications
-│   ├── basic/               # Vanilla JS example
-│   └── react/               # React example
-└── .github/workflows/        # CI/CD workflows
-```
-
-## Docker
-
-The examples can be run using Docker. The image is automatically built and published to GitHub Container Registry.
-
-### Pull and Run
-
-```bash
-# Pull the latest image
-docker pull ghcr.io/opengeos/maplibre-gl-plugin-template:latest
-
-# Run the container
-docker run -p 8080:80 ghcr.io/opengeos/maplibre-gl-plugin-template:latest
-```
-
-Then open http://localhost:8080/maplibre-gl-plugin-template/ in your browser to view the examples.
-
-### Build Locally
-
-```bash
-# Build the image
-docker build -t maplibre-gl-plugin-template .
-
-# Run the container
-docker run -p 8080:80 maplibre-gl-plugin-template
-```
-
-### Available Tags
-
-| Tag | Description |
-|-----|-------------|
-| `latest` | Latest release |
-| `x.y.z` | Specific version (e.g., `1.0.0`) |
-| `x.y` | Minor version (e.g., `1.0`) |
-
-## Customization
-
-To use this template for your own plugin:
-
-1. Clone or fork this repository
-2. Update `package.json` with your plugin name and details
-3. Modify `src/lib/core/PluginControl.ts` to implement your plugin logic
-4. Update the styles in `src/lib/styles/plugin-control.css`
-5. Add custom utilities, hooks, or components as needed
-6. Update the README with your plugin's documentation
-
-## License
-
-MIT License - see [LICENSE](LICENSE) for details.

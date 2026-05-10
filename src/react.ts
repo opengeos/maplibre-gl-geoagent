@@ -1,14 +1,12 @@
-// React entry point
-export { PluginControlReact } from './lib/core/PluginControlReact';
+export { GeoAgentControlReact } from './lib/core/GeoAgentControlReact';
+export { useGeoAgentState } from './lib/hooks';
 
-// React hooks
-export { usePluginState } from './lib/hooks';
-
-// Re-export types for React consumers
 export type {
-  PluginControlOptions,
-  PluginState,
-  PluginControlReactProps,
-  PluginControlEvent,
-  PluginControlEventHandler,
+  GeoAgentControlEvent,
+  GeoAgentControlEventHandler,
+  GeoAgentControlOptions,
+  GeoAgentControlReactProps,
+  GeoAgentProviderConfig,
+  GeoAgentProviderId,
+  GeoAgentState,
 } from './lib/core/types';

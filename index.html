@@ -3,19 +3,19 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>MapLibre GL Plugin Template - Examples</title>
+  <title>maplibre-gl-geoagent Examples</title>
   <style>
     * {
-      margin: 0;
-      padding: 0;
       box-sizing: border-box;
     }
 
     body {
-      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      margin: 0;
       min-height: 100vh;
       padding: 40px 20px;
+      background: #eef2f6;
+      color: #17202a;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
     }
 
     .container {
@@ -24,120 +24,103 @@
     }
 
     h1 {
-      color: white;
-      text-align: center;
-      margin-bottom: 10px;
-      font-size: 2.5rem;
+      margin: 0 0 10px;
+      font-size: 2.25rem;
+      line-height: 1.1;
     }
 
     .subtitle {
-      color: rgba(255, 255, 255, 0.9);
-      text-align: center;
-      margin-bottom: 40px;
-      font-size: 1.1rem;
+      margin: 0 0 32px;
+      color: #5f6b7a;
+      font-size: 1.05rem;
     }
 
     .examples-grid {
       display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
-      gap: 20px;
+      grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+      gap: 16px;
     }
 
     .example-card {
-      background: white;
-      border-radius: 12px;
-      padding: 24px;
-      box-shadow: 0 10px 40px rgba(0, 0, 0, 0.2);
-      transition: transform 0.2s, box-shadow 0.2s;
-      text-decoration: none;
-      color: inherit;
       display: block;
+      padding: 20px;
+      border: 1px solid #d7dde5;
+      border-radius: 8px;
+      background: #fff;
+      color: inherit;
+      text-decoration: none;
     }
 
     .example-card:hover {
-      transform: translateY(-4px);
-      box-shadow: 0 15px 50px rgba(0, 0, 0, 0.3);
+      border-color: #0f766e;
     }
 
     .example-card h2 {
-      color: #333;
-      margin-bottom: 8px;
-      font-size: 1.3rem;
+      margin: 0 0 8px;
+      font-size: 1.2rem;
     }
 
     .example-card p {
-      color: #666;
-      font-size: 0.95rem;
+      margin: 0 0 16px;
+      color: #5f6b7a;
       line-height: 1.5;
-      margin-bottom: 16px;
     }
 
-    .example-card .tags {
+    .tags {
       display: flex;
       flex-wrap: wrap;
       gap: 8px;
     }
 
     .tag {
-      background: #f0f0f0;
-      color: #555;
       padding: 4px 10px;
       border-radius: 4px;
+      background: #edf2f7;
+      color: #445160;
       font-size: 0.8rem;
-      font-weight: 500;
+      font-weight: 650;
     }
 
-    .tag.vanilla { background: #fff3e0; color: #ef6c00; }
-    .tag.react { background: #e1f5fe; color: #0277bd; }
-    .tag.typescript { background: #e3f2fd; color: #1565c0; }
-
     .footer {
-      text-align: center;
-      margin-top: 40px;
-      color: rgba(255, 255, 255, 0.8);
+      margin-top: 32px;
+      color: #5f6b7a;
     }
 
     .footer a {
-      color: white;
-      text-decoration: none;
-      font-weight: 500;
-    }
-
-    .footer a:hover {
-      text-decoration: underline;
+      color: #0f766e;
+      font-weight: 650;
     }
   </style>
 </head>
 <body>
   <div class="container">
-    <h1>MapLibre GL Plugin Template</h1>
-    <p class="subtitle">A template for creating MapLibre GL JS plugins with TypeScript and React support</p>
+    <h1>maplibre-gl-geoagent</h1>
+    <p class="subtitle">A browser-only GeoAgent control for MapLibre maps.</p>
 
     <div class="examples-grid">
       <a href="./examples/basic/index.html" class="example-card">
         <h2>Basic Example</h2>
-        <p>Simple vanilla JavaScript/TypeScript example showing how to add the plugin control to a map.</p>
+        <p>Use the vanilla `GeoAgentControl` with a MapLibre map.</p>
         <div class="tags">
-          <span class="tag vanilla">Vanilla JS</span>
-          <span class="tag typescript">TypeScript</span>
+          <span class="tag">Vanilla JS</span>
+          <span class="tag">TypeScript</span>
         </div>
       </a>
 
       <a href="./examples/react/index.html" class="example-card">
         <h2>React Example</h2>
-        <p>React example demonstrating the React wrapper component and custom hooks integration.</p>
+        <p>Use `GeoAgentControlReact` and the React state hook.</p>
         <div class="tags">
-          <span class="tag react">React</span>
-          <span class="tag typescript">TypeScript</span>
+          <span class="tag">React</span>
+          <span class="tag">TypeScript</span>
         </div>
       </a>
     </div>
 
     <div class="footer">
-      <p>
-        <a href="https://github.com/your-username/maplibre-gl-plugin-template">GitHub</a> ·
-        <a href="https://www.npmjs.com/package/maplibre-gl-plugin-template">npm</a>
-      </p>
+      <a href="https://github.com/opengeos/maplibre-gl-geoagent">GitHub</a>
+      ·
+      <a href="https://www.npmjs.com/package/maplibre-gl-geoagent">npm</a>
     </div>
   </div>
 </body>
