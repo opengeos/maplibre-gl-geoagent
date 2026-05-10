@@ -175,6 +175,45 @@ describe('GeoAgentControl', () => {
     map.cleanup();
   });
 
+  it('cycles through prompt history with up and down arrows', async () => {
+    const map = new MockMap();
+    const control = new GeoAgentControl();
+    const container = control.onAdd(map as never);
+    map.controlStack.appendChild(container);
+    const prompt = map.mapContainer.querySelector<HTMLTextAreaElement>('.geoagent-prompt')!;
+    const form = map.mapContainer.querySelector<HTMLFormElement>('.geoagent-form')!;
+
+    prompt.value = 'first prompt';
+    prompt.dispatchEvent(new Event('input', { bubbles: true }));
+    form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+    await vi.waitFor(() => expect(control.getState().busy).toBe(false));
+
+    prompt.value = 'second prompt';
+    prompt.dispatchEvent(new Event('input', { bubbles: true }));
+    form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+    await vi.waitFor(() => expect(control.getState().busy).toBe(false));
+
+    prompt.value = 'draft';
+    prompt.setSelectionRange(0, 0);
+    prompt.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowUp', bubbles: true }));
+    expect(prompt.value).toBe('second prompt');
+
+    prompt.setSelectionRange(prompt.value.length, prompt.value.length);
+    prompt.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowUp', bubbles: true }));
+    expect(prompt.value).toBe('first prompt');
+
+    prompt.setSelectionRange(prompt.value.length, prompt.value.length);
+    prompt.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true }));
+    expect(prompt.value).toBe('second prompt');
+
+    prompt.setSelectionRange(prompt.value.length, prompt.value.length);
+    prompt.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true }));
+    expect(prompt.value).toBe('draft');
+
+    control.onRemove();
+    map.cleanup();
+  });
+
   it('resizes the panel with the drag handle and clamps width', () => {
     const map = new MockMap();
     const control = new GeoAgentControl({

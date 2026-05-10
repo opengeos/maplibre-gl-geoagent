@@ -155,6 +155,9 @@ export class GeoAgentControl implements IControl {
   private agentSignature = '';
   private streamingAssistantTextEl: HTMLDivElement | null = null;
   private streamingAssistantText = '';
+  private promptHistory: string[] = [];
+  private promptHistoryIndex = -1;
+  private promptHistoryDraft = '';
   private state: GeoAgentState;
   private eventHandlers: EventHandlersMap = new globalThis.Map();
   private resizeHandler: (() => void) | null = null;
@@ -248,6 +251,9 @@ export class GeoAgentControl implements IControl {
     this.agentSignature = '';
     this.streamingAssistantTextEl = null;
     this.streamingAssistantText = '';
+    this.promptHistory = [];
+    this.promptHistoryIndex = -1;
+    this.promptHistoryDraft = '';
     this.eventHandlers.clear();
   }
 
@@ -623,6 +629,10 @@ export class GeoAgentControl implements IControl {
       if (event.key === 'Enter' && (event.ctrlKey || event.metaKey)) {
         event.preventDefault();
         void this.sendPrompt();
+        return;
+      }
+      if (event.key === 'ArrowUp' || event.key === 'ArrowDown') {
+        this.handlePromptHistoryKey(event);
       }
     });
     ui.clearButton.addEventListener('click', () => {
@@ -667,6 +677,68 @@ export class GeoAgentControl implements IControl {
       }
     };
     this.map?.on('resize', this.mapResizeHandler);
+  }
+
+  private rememberPrompt(text: string): void {
+    if (this.promptHistory[this.promptHistory.length - 1] !== text) {
+      this.promptHistory.push(text);
+    }
+    this.promptHistoryIndex = -1;
+    this.promptHistoryDraft = '';
+  }
+
+  private applyPromptHistoryValue(value: string): void {
+    if (!this.ui) {
+      return;
+    }
+    this.ui.prompt.value = value;
+    this.updateControls();
+    requestAnimationFrame(() => {
+      this.ui?.prompt.setSelectionRange(value.length, value.length);
+    });
+  }
+
+  private handlePromptHistoryKey(event: KeyboardEvent): void {
+    if (!this.ui || this.promptHistory.length === 0) {
+      return;
+    }
+    const prompt = this.ui.prompt;
+    const beforeSelection = prompt.value.slice(0, prompt.selectionStart);
+    const afterSelection = prompt.value.slice(prompt.selectionEnd);
+    const onFirstLine = !beforeSelection.includes('\n');
+    const onLastLine = !afterSelection.includes('\n');
+    if (event.key === 'ArrowUp' && !onFirstLine) {
+      return;
+    }
+    if (event.key === 'ArrowDown' && !onLastLine) {
+      return;
+    }
+
+    event.preventDefault();
+
+    if (this.promptHistoryIndex === -1) {
+      this.promptHistoryDraft = prompt.value;
+    }
+
+    if (event.key === 'ArrowUp') {
+      this.promptHistoryIndex =
+        this.promptHistoryIndex === -1
+          ? this.promptHistory.length - 1
+          : Math.max(0, this.promptHistoryIndex - 1);
+      this.applyPromptHistoryValue(this.promptHistory[this.promptHistoryIndex]);
+      return;
+    }
+
+    if (this.promptHistoryIndex === -1) {
+      return;
+    }
+    this.promptHistoryIndex += 1;
+    if (this.promptHistoryIndex >= this.promptHistory.length) {
+      this.promptHistoryIndex = -1;
+      this.applyPromptHistoryValue(this.promptHistoryDraft);
+      return;
+    }
+    this.applyPromptHistoryValue(this.promptHistory[this.promptHistoryIndex]);
   }
 
   private constrainPanelWidth(width: number): number {
@@ -1018,6 +1090,7 @@ export class GeoAgentControl implements IControl {
     if (!text || this.state.busy) {
       return;
     }
+    this.rememberPrompt(text);
     this.appendLog('user', text);
     this.streamingAssistantTextEl = null;
     this.streamingAssistantText = '';
