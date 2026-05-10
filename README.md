@@ -4,6 +4,11 @@ A browser-only GeoAgent control for MapLibre GL JS. The control implements
 MapLibre's `IControl` interface and embeds a Strands TypeScript agent that can
 inspect and operate on the live map through dedicated browser tools.
 
+[![npm version](https://img.shields.io/npm/v/maplibre-gl-geoagent.svg)](https://www.npmjs.com/package/maplibre-gl-geoagent)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![Open in CodeSandbox](https://img.shields.io/badge/Open%20in-CodeSandbox-blue?logo=codesandbox)](https://codesandbox.io/p/github/opengeos/maplibre-gl-geoagent)
+[![Open in StackBlitz](https://img.shields.io/badge/Open%20in-StackBlitz-blue?logo=stackblitz)](https://stackblitz.com/github/opengeos/maplibre-gl-geoagent)
+
 ## Features
 
 - Collapsible MapLibre control with a floating chat panel
@@ -113,22 +118,22 @@ Converse model ID, and set the AWS region. The default Bedrock model is
 
 ## Options
 
-| Option | Type | Default |
-| --- | --- | --- |
-| `collapsed` | `boolean` | `true` |
-| `position` | `'top-left' \| 'top-right' \| 'bottom-left' \| 'bottom-right'` | `'top-right'` |
-| `title` | `string` | `'GeoAgent'` |
-| `panelWidth` | `number` | `390` |
-| `panelMinWidth` | `number` | `320` |
-| `panelMaxWidth` | `number` | `720` |
-| `className` | `string` | `''` |
-| `defaultProvider` | `GeoAgentProviderId` | `'openai-responses'` |
-| `defaultModel` | `string \| Partial<Record<GeoAgentProviderId, string>>` | provider default |
-| `storagePrefix` | `string` | `'geoagent.maplibre'` |
-| `allowCodeExecutionDefault` | `boolean` | `true` |
-| `allowDestructiveToolsDefault` | `boolean` | `true` |
-| `showPermissionToggles` | `boolean` | `false` |
-| `basemaps` | `Record<string, string \| StyleSpecification>` | built-in basemaps |
+| Option                         | Type                                                           | Default               |
+| ------------------------------ | -------------------------------------------------------------- | --------------------- |
+| `collapsed`                    | `boolean`                                                      | `true`                |
+| `position`                     | `'top-left' \| 'top-right' \| 'bottom-left' \| 'bottom-right'` | `'top-right'`         |
+| `title`                        | `string`                                                       | `'GeoAgent'`          |
+| `panelWidth`                   | `number`                                                       | `390`                 |
+| `panelMinWidth`                | `number`                                                       | `320`                 |
+| `panelMaxWidth`                | `number`                                                       | `720`                 |
+| `className`                    | `string`                                                       | `''`                  |
+| `defaultProvider`              | `GeoAgentProviderId`                                           | `'openai-responses'`  |
+| `defaultModel`                 | `string \| Partial<Record<GeoAgentProviderId, string>>`        | provider default      |
+| `storagePrefix`                | `string`                                                       | `'geoagent.maplibre'` |
+| `allowCodeExecutionDefault`    | `boolean`                                                      | `true`                |
+| `allowDestructiveToolsDefault` | `boolean`                                                      | `true`                |
+| `showPermissionToggles`        | `boolean`                                                      | `false`               |
+| `basemaps`                     | `Record<string, string \| StyleSpecification>`                 | built-in basemaps     |
 
 ## Browser Credentials
 
