@@ -12,6 +12,7 @@ import { z } from "zod";
 import {
   buildGeeVisParams,
   EarthEngineService,
+  parseBbox,
   type EarthEngineOptions,
 } from "./earth-engine";
 
@@ -864,7 +865,7 @@ export class MapLibreAgentTools {
           tool({
             name: "run_gee_javascript_snippet",
             description:
-              "Run a constrained Earth Engine JavaScript snippet that adds one or more MapLibre raster tile layers.",
+              "Run an Earth Engine JavaScript snippet (executed with new Function, not sandboxed) that adds one or more MapLibre raster tile layers.",
             inputSchema: z.object({
               code: z
                 .string()
@@ -1146,7 +1147,12 @@ export class MapLibreAgentTools {
         style = this.basemaps[style];
       }
       this.map.setStyle(style);
-      await this.waitForMapEvent("style.load");
+      const styleLoaded = await this.waitForMapEvent("style.load");
+      if (!styleLoaded) {
+        throw new Error(
+          `Basemap change to ${rawStyle} timed out waiting for style.load.`,
+        );
+      }
       await this.restoreOverlaysAfterStyleChange();
       return `Basemap changed to ${rawStyle}.`;
     }
@@ -2726,9 +2732,12 @@ export class MapLibreAgentTools {
         );
       }
       if (args.bbox) {
-        lines.push(
-          `collection = collection.filterBounds(ee.Geometry.Rectangle(${JSON.stringify(args.bbox)}));`,
-        );
+        const bbox = parseBbox(args.bbox);
+        if (bbox) {
+          lines.push(
+            `collection = collection.filterBounds(ee.Geometry.Rectangle(${JSON.stringify(bbox)}));`,
+          );
+        }
       }
       const reducer = stringArg(args, "reducer", "mosaic");
       lines.push(

@@ -1404,7 +1404,12 @@ export class EarthEngineService {
       bestEffort: input.best_effort !== false,
       tileScale: Number(input.tile_scale ?? 4),
     });
-    const values = await evaluateEeObject(reduction);
+    const timeoutSeconds = Number(input.timeout_seconds ?? 60);
+    const values = await withEeTimeout(
+      evaluateEeObject(reduction),
+      timeoutSeconds,
+      `Earth Engine statistics evaluation timed out after ${timeoutSeconds}s`,
+    );
     const valueObject =
       values && typeof values === "object" && !Array.isArray(values)
         ? (values as Record<string, unknown>)
@@ -1423,7 +1428,7 @@ export class EarthEngineService {
       max_pixels: Number(input.max_pixels ?? 100000000),
       best_effort: input.best_effort !== false,
       tile_scale: Number(input.tile_scale ?? 4),
-      timeout_seconds: Number(input.timeout_seconds ?? 60),
+      timeout_seconds: timeoutSeconds,
       region: regionInfo,
       approximate: input.best_effort !== false,
     };
@@ -1650,6 +1655,27 @@ function buildStatisticsReducer(
     });
   }
   return { reducer, statistics };
+}
+
+async function withEeTimeout<T>(
+  promise: Promise<T>,
+  timeoutSeconds: number,
+  message: string,
+): Promise<T> {
+  if (!Number.isFinite(timeoutSeconds) || timeoutSeconds <= 0) {
+    return promise;
+  }
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new Error(message)), timeoutSeconds * 1000);
+  });
+  try {
+    return await Promise.race([promise, timeout]);
+  } finally {
+    if (timer) {
+      clearTimeout(timer);
+    }
+  }
 }
 
 async function evaluateEeObject(object: EeObject): Promise<unknown> {

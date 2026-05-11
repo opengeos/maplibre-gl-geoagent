@@ -1012,16 +1012,20 @@ describe("MapLibreAgentTools native tools", () => {
     expect(map.getLayer("points-point")).toBeTruthy();
   });
 
-  it("does not hang forever when style.load is not emitted", async () => {
+  it("surfaces a timeout error when style.load is not emitted", async () => {
     vi.useFakeTimers();
     try {
       const { agent, map } = createAgent();
       map.once = vi.fn();
 
       const result = agent.runCommand("change_basemap", { style: "osm" });
+      const captured = result.catch((error: unknown) => error);
       await vi.advanceTimersByTimeAsync(9000);
-
-      await expect(result).resolves.toBe("Basemap changed to osm.");
+      const error = await captured;
+      expect(error).toBeInstanceOf(Error);
+      expect((error as Error).message).toMatch(
+        /timed out waiting for style\.load/,
+      );
     } finally {
       vi.useRealTimers();
     }
