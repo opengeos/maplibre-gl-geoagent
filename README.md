@@ -131,6 +131,7 @@ Converse model ID, and set the AWS region. The default Bedrock model is
 | `defaultProvider`              | `GeoAgentProviderId`                                           | `'openai-responses'`  |
 | `defaultModel`                 | `string \| Partial<Record<GeoAgentProviderId, string>>`        | provider default      |
 | `storagePrefix`                | `string`                                                       | `'geoagent.maplibre'` |
+| `apiKeys`                      | `Partial<Record<GeoAgentProviderId, string>>`                  | `undefined`           |
 | `allowCodeExecutionDefault`    | `boolean`                                                      | `true`                |
 | `allowDestructiveToolsDefault` | `boolean`                                                      | `true`                |
 | `showPermissionToggles`        | `boolean`                                                      | `false`               |
@@ -182,6 +183,24 @@ panel are stored in `sessionStorage` under the configured `storagePrefix` and
 are sent directly from the page to the selected model provider. Use this for
 local development, trusted internal apps, or apps that intentionally expose a
 browser-compatible credential path.
+
+Host applications can prefill the panel with initial API keys:
+
+```typescript
+new GeoAgentControl({
+  apiKeys: {
+    "openai-responses": "OPENAI_API_KEY_VALUE",
+    "openai-chat": "OPENAI_API_KEY_VALUE",
+    anthropic: "ANTHROPIC_API_KEY_VALUE",
+    google: "GOOGLE_API_KEY_VALUE",
+    bedrock: "AWS_BEARER_TOKEN_BEDROCK_VALUE",
+  },
+});
+```
+
+Saved `sessionStorage` values take precedence over `apiKeys`. Initial keys are
+kept in browser memory and are not written to storage unless the user edits the
+API key field.
 
 For Amazon Bedrock, this browser-only control uses Bedrock API-key bearer-token
 authentication. Do not enter AWS access key IDs, secret access keys, or session
