@@ -364,12 +364,11 @@ export class MapLibreAgentTools {
     const filterSchema = z
       .array(z.any())
       .nullable()
-      .optional()
       .describe(
-        "Optional MapLibre filter expression, or null to clear the filter.",
+        "MapLibre filter expression, or null to clear the filter. Required.",
       );
     const cornerCoordinatesSchema = z
-      .array(z.tuple([z.number(), z.number()]))
+      .array(z.array(z.number()).length(2))
       .length(4)
       .describe(
         "Four image/video corner coordinates: top-left, top-right, bottom-right, bottom-left.",
@@ -517,10 +516,7 @@ export class MapLibreAgentTools {
         inputSchema: z.object({
           source_id: z.string().describe("Source id to remove."),
         }),
-        callback: (input) => {
-          this.requireDestructiveApproval("Source removal");
-          return this.runCommand("remove_map_source", input);
-        },
+        callback: (input) => this.runCommand("remove_map_source", input),
       }),
       tool({
         name: "add_map_layer",
@@ -541,10 +537,7 @@ export class MapLibreAgentTools {
         inputSchema: z.object({
           layer_id: z.string().describe("Layer id to remove."),
         }),
-        callback: (input) => {
-          this.requireDestructiveApproval("Layer removal");
-          return this.runCommand("remove_map_layer", input);
-        },
+        callback: (input) => this.runCommand("remove_map_layer", input),
       }),
       tool({
         name: "move_layer",
@@ -1066,8 +1059,13 @@ export class MapLibreAgentTools {
     if (command === "set_layer_filter") {
       const layerId = stringArg(args, "layer_id");
       this.requireLayer(layerId);
+      if (!("filter" in args)) {
+        throw new Error(
+          "set_layer_filter requires filter (use null to clear).",
+        );
+      }
       const filter =
-        args.filter == null ? null : (args.filter as FilterSpecification);
+        args.filter === null ? null : (args.filter as FilterSpecification);
       this.map.setFilter(layerId, filter);
       this.updateOverlayLayerSpec(layerId, (layer) => {
         const mutableLayer = layer as LayerSpecification & {
@@ -2119,24 +2117,31 @@ export class MapLibreAgentTools {
     }));
     this.overlays.clear();
     for (const overlay of saved) {
-      if (overlay.kind === "geojson") {
-        await this.addGeoJsonOverlay({
-          name: overlay.name,
-          data: overlay.data,
-          url: overlay.url,
-          style: overlay.style,
-        });
-      } else if (overlay.kind === "raster" && overlay.url) {
-        await this.addRasterOverlay({
-          name: overlay.name,
-          url: overlay.url,
-          attribution: overlay.attribution,
-        });
-      } else if (overlay.kind === "marker" && overlay.marker) {
-        overlay.marker.addTo(this.map);
-        this.overlays.set(overlay.name, overlay);
-      } else if (overlay.kind === "native") {
-        await this.replayNativeOverlay(overlay);
+      try {
+        if (overlay.kind === "geojson") {
+          await this.addGeoJsonOverlay({
+            name: overlay.name,
+            data: overlay.data,
+            url: overlay.url,
+            style: overlay.style,
+          });
+        } else if (overlay.kind === "raster" && overlay.url) {
+          await this.addRasterOverlay({
+            name: overlay.name,
+            url: overlay.url,
+            attribution: overlay.attribution,
+          });
+        } else if (overlay.kind === "marker" && overlay.marker) {
+          overlay.marker.addTo(this.map);
+          this.overlays.set(overlay.name, overlay);
+        } else if (overlay.kind === "native") {
+          await this.replayNativeOverlay(overlay);
+        }
+      } catch (error) {
+        console.error(
+          `Failed to restore overlay "${overlay.name}" after style change:`,
+          error,
+        );
       }
     }
   }
