@@ -734,6 +734,29 @@ describe("MapLibreAgentTools native tools", () => {
     );
   });
 
+  it("emits an OpenAI-compatible image coordinate schema", () => {
+    const { agent } = createAgent();
+    const imageTool = agent
+      .createTools()
+      .find((item) => item.name === "add_image_layer");
+    const inputSchema = imageTool?.toolSpec.inputSchema as {
+      properties?: Record<string, unknown>;
+    };
+    const coordinatesSchema = inputSchema.properties?.coordinates as {
+      items?: {
+        type?: string;
+        items?: unknown;
+        prefixItems?: unknown;
+      };
+    };
+
+    expect(coordinatesSchema.items).toMatchObject({
+      type: "array",
+      items: { type: "number" },
+    });
+    expect(coordinatesSchema.items?.prefixItems).toBeUndefined();
+  });
+
   it("adds and mutates generic native sources and layers", async () => {
     const { agent, map } = createAgent();
 
