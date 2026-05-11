@@ -154,6 +154,16 @@ const mockEe = {
     getAuthToken: vi.fn(() => null as string | null),
     getAuthClientId: vi.fn(() => null as string | null),
     clearAuthToken: vi.fn(),
+    setAuthToken: vi.fn(
+      (
+        _clientId: string,
+        _tokenType: string,
+        _accessToken: string,
+        _expiresIn: number,
+        _extraScopes?: string[],
+        callback?: () => void,
+      ) => callback?.(),
+    ),
   },
   initialize: vi.fn(
     (
@@ -220,6 +230,17 @@ beforeEach(() => {
   mockEe.data.getAuthClientId.mockReset();
   mockEe.data.getAuthClientId.mockReturnValue(null);
   mockEe.data.clearAuthToken.mockReset();
+  mockEe.data.setAuthToken.mockReset();
+  mockEe.data.setAuthToken.mockImplementation(
+    (
+      _clientId: string,
+      _tokenType: string,
+      _accessToken: string,
+      _expiresIn: number,
+      _extraScopes?: string[],
+      callback?: () => void,
+    ) => callback?.(),
+  );
   mockEe.initialize.mockReset();
   mockEe.initialize.mockImplementation(
     (
@@ -383,6 +404,50 @@ describe("Earth Engine catalog helpers", () => {
       undefined,
       expect.any(Function),
     );
+  });
+
+  it("uses a configured Earth Engine access token without browser OAuth", async () => {
+    const service = new EarthEngineService({
+      accessToken: "python-token",
+      projectId: "project",
+      tokenExpiresIn: 1800,
+    });
+
+    await service.initialize();
+
+    expect(mockEe.data.setAuthToken).toHaveBeenCalledWith(
+      "",
+      "Bearer",
+      "python-token",
+      1800,
+      [],
+      expect.any(Function),
+      false,
+    );
+    expect(mockEe.data.authenticateViaOauth).not.toHaveBeenCalled();
+    expect(mockEe.data.authenticateViaPopup).not.toHaveBeenCalled();
+    expect(mockEe.initialize).toHaveBeenCalledTimes(1);
+  });
+
+  it("uses the OAuth client id when seeding a configured access token", async () => {
+    const service = new EarthEngineService({
+      oauthClientId: "client",
+      accessToken: "python-token",
+      projectId: "project",
+    });
+
+    await service.initialize();
+
+    expect(mockEe.data.setAuthToken).toHaveBeenCalledWith(
+      "client",
+      "Bearer",
+      "python-token",
+      3600,
+      [],
+      expect.any(Function),
+      false,
+    );
+    expect(mockEe.data.authenticateViaOauth).not.toHaveBeenCalled();
   });
 
   it("deduplicates concurrent Earth Engine initialization", async () => {

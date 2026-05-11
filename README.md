@@ -154,6 +154,27 @@ The Earth Engine integration uses browser OAuth through the official
 not supported in this browser-only package. Use a backend proxy if your
 deployment needs service account access.
 
+Host applications that already authenticate Earth Engine outside the browser
+can provide a short-lived OAuth access token instead of launching browser
+OAuth:
+
+```typescript
+new GeoAgentControl({
+  earthEngine: {
+    accessToken: "SHORT_LIVED_EARTH_ENGINE_ACCESS_TOKEN",
+    tokenType: "Bearer",
+    tokenExpiresIn: 3600,
+    projectId: "your-earth-engine-project",
+    includeCommunityCatalog: true,
+  },
+});
+```
+
+Access tokens are passed to the browser JavaScript runtime and should be
+short-lived. Do not persist them in page source, notebooks, local storage, or
+session storage. For untrusted users or production deployments, prefer a
+backend proxy.
+
 ## Browser Credentials
 
 This package runs model SDKs directly in the browser. API keys entered in the
