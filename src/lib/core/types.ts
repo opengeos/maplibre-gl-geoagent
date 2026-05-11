@@ -101,8 +101,9 @@ export interface GeoAgentControlOptions {
   basemaps?: Record<string, string | StyleSpecification>;
 
   /**
-   * Optional Google Earth Engine tool configuration. Browser OAuth is used;
-   * do not provide service account private keys to this browser package.
+   * Optional Google Earth Engine tool configuration. Browser OAuth is used by
+   * default; host applications may also provide a short-lived access token.
+   * Do not provide service account private keys to this browser package.
    */
   earthEngine?: EarthEngineOptions;
 }

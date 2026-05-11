@@ -327,7 +327,33 @@ describe("GeoAgentControl", () => {
 
     expect(details?.hidden).toBe(false);
     expect(details?.open).toBe(true);
-    expect(status?.textContent).toContain("OAuth Client ID is not configured");
+    expect(status?.textContent).toContain("OAuth Client ID or access token");
+
+    control.onRemove();
+    map.cleanup();
+  });
+
+  it("accepts an Earth Engine access token without an OAuth client id", () => {
+    const map = new MockMap();
+    const control = new GeoAgentControl({
+      storagePrefix: "geoagent.ee.token",
+      earthEngine: {
+        accessToken: "python-token",
+        projectId: "project",
+      },
+    });
+    const container = control.onAdd(map as never);
+    map.controlStack.appendChild(container);
+    const details = map.mapContainer.querySelector<HTMLDetailsElement>(
+      ".geoagent-earth-engine",
+    );
+    const status = map.mapContainer.querySelector<HTMLDivElement>(
+      ".geoagent-earth-engine-status",
+    );
+
+    expect(details?.hidden).toBe(false);
+    expect(details?.open).toBe(false);
+    expect(status?.textContent).toContain("Initialized:");
 
     control.onRemove();
     map.cleanup();

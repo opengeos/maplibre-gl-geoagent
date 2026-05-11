@@ -2,6 +2,9 @@ export interface EarthEngineOptions {
   enabled?: boolean;
   oauthClientId?: string;
   projectId?: string;
+  accessToken?: string;
+  tokenType?: string;
+  tokenExpiresIn?: number;
   includeCommunityCatalog?: boolean;
   catalogCacheTtlMs?: number;
 }
@@ -73,6 +76,16 @@ interface EeModule {
     getAuthToken?: () => string | null | undefined;
     getAuthClientId?: () => string | null | undefined;
     clearAuthToken?: () => void;
+    setAuthToken?: (
+      clientId: string,
+      tokenType: string,
+      accessToken: string,
+      expiresIn: number,
+      extraScopes?: string[],
+      callback?: () => void,
+      updateAuthLibrary?: boolean,
+      suppressDefaultScopes?: boolean,
+    ) => void;
   };
   initialize?: (
     baseUrl?: string | null,
@@ -579,6 +592,11 @@ function normalizeOptionalString(value: unknown): string | undefined {
   return text ? text : undefined;
 }
 
+function normalizeTokenExpiresIn(value: unknown): number {
+  const seconds = Number(value);
+  return Number.isFinite(seconds) && seconds > 0 ? seconds : 3600;
+}
+
 export class EarthEngineService {
   private eePromise: Promise<EeModule> | null = null;
   private authPromise: Promise<void> | null = null;
@@ -597,12 +615,15 @@ export class EarthEngineService {
   updateOptions(options: EarthEngineOptions): void {
     const previousOauthClientId = normalizeOptionalString(this.options.oauthClientId);
     const previousProjectId = normalizeOptionalString(this.options.projectId);
+    const previousAccessToken = normalizeOptionalString(this.options.accessToken);
     const nextOauthClientId = normalizeOptionalString(options.oauthClientId);
     const nextProjectId = normalizeOptionalString(options.projectId);
+    const nextAccessToken = normalizeOptionalString(options.accessToken);
     this.options = { ...this.options, ...options };
     if (
       previousOauthClientId !== nextOauthClientId ||
-      previousProjectId !== nextProjectId
+      previousProjectId !== nextProjectId ||
+      previousAccessToken !== nextAccessToken
     ) {
       this.initialized = false;
       this.initializedProjectId = undefined;
@@ -749,6 +770,12 @@ export class EarthEngineService {
     ee: EeModule,
     oauthClientId?: string,
   ): Promise<void> {
+    const configuredAccessToken = normalizeOptionalString(this.options.accessToken);
+    if (configuredAccessToken) {
+      await this.applyAccessToken(ee, oauthClientId, configuredAccessToken);
+      return;
+    }
+
     const token = ee.data?.getAuthToken?.();
     const currentAuthClientId = normalizeOptionalString(ee.data?.getAuthClientId?.());
     if (token) {
@@ -790,6 +817,34 @@ export class EarthEngineService {
       this.authPromise = null;
     });
     return this.authPromise;
+  }
+
+  private async applyAccessToken(
+    ee: EeModule,
+    oauthClientId: string | undefined,
+    accessToken: string,
+  ): Promise<void> {
+    if (!ee.data?.setAuthToken) {
+      throw new Error("Earth Engine token authentication is unavailable.");
+    }
+    const clientId = oauthClientId ?? "";
+    const tokenType = normalizeOptionalString(this.options.tokenType) ?? "Bearer";
+    const expiresIn = normalizeTokenExpiresIn(this.options.tokenExpiresIn);
+    await new Promise<void>((resolve, reject) => {
+      try {
+        ee.data?.setAuthToken?.(
+          clientId,
+          tokenType,
+          accessToken,
+          expiresIn,
+          [],
+          resolve,
+          false,
+        );
+      } catch (error) {
+        reject(new Error(eeErrorMessage(error)));
+      }
+    });
   }
 
   async catalog(includeCommunity = this.options.includeCommunityCatalog ?? true): Promise<GeeDataset[]> {

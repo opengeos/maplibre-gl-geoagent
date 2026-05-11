@@ -621,13 +621,14 @@ export class GeoAgentControl implements IControl {
     const oauthClientId = firstValue(
       this.options.earthEngine?.oauthClientId,
     );
+    const accessToken = firstValue(this.options.earthEngine?.accessToken);
     const projectId = firstValue(
       storageGet(this.earthEngineProjectIdStorageKey()),
       this.options.earthEngine?.projectId,
     );
     this.ui.earthEngineClientIdInput.value = oauthClientId;
     this.ui.earthEngineProjectIdInput.value = projectId;
-    this.ui.earthEngineDetails.open = !oauthClientId || !projectId;
+    this.ui.earthEngineDetails.open = (!oauthClientId && !accessToken) || !projectId;
     this.applyEarthEngineSettings();
   }
 
@@ -657,13 +658,14 @@ export class GeoAgentControl implements IControl {
       return;
     }
     const oauthClientId = this.ui.earthEngineClientIdInput.value.trim();
+    const accessToken = this.options.earthEngine?.accessToken?.trim();
     const projectId = this.ui.earthEngineProjectIdInput.value.trim();
     const earthEngine = this.state.data?.earthEngine as
       | { initialized?: boolean; layerCount?: number }
       | undefined;
-    if (!oauthClientId) {
+    if (!oauthClientId && !accessToken) {
       this.ui.earthEngineStatus.textContent =
-        'OAuth Client ID is not configured by this app. Set VITE_GEE_OAUTH_CLIENT_ID before running Earth Engine tools.';
+        'OAuth Client ID or access token is not configured by this app. Set VITE_GEE_OAUTH_CLIENT_ID or provide earthEngine.accessToken before running Earth Engine tools.';
       return;
     }
     if (!projectId) {
