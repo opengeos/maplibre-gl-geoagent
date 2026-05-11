@@ -18,17 +18,30 @@ Open <http://localhost:5173/examples/basic/>.
 
 ## Earth Engine Example
 
-A vanilla TypeScript example with Google Earth Engine tools enabled. Provide
-browser OAuth and project values with the on-page form, URL parameters, or Vite
-environment variables:
+A vanilla TypeScript example with Google Earth Engine tools enabled. Copy
+`.env.example` to `.env` and set the Vite environment variables:
 
 ```bash
-VITE_GEE_OAUTH_CLIENT_ID=your-client-id \
-VITE_GEE_PROJECT_ID=your-project-id \
+cp .env.example .env
+```
+
+```env
+VITE_GEE_OAUTH_CLIENT_ID=your-client-id.apps.googleusercontent.com
+# Optional default. Users can also enter their own project ID in the panel.
+VITE_GEE_PROJECT_ID=
+```
+
+Then run:
+
+```bash
 npm run dev
 ```
 
 Open <http://localhost:5173/examples/earth-engine/>.
+
+For a public deployment, configure `VITE_GEE_OAUTH_CLIENT_ID` at build time and
+leave `VITE_GEE_PROJECT_ID` unset so each user can enter their own Earth
+Engine-enabled Google Cloud project ID in the GeoAgent panel.
 
 ## React Example
 

@@ -214,8 +214,13 @@ What features are visible at the center of the current map?
 
 ```bash
 npm install
+cp .env.example .env
 npm run dev
 npm test
 npm run build
 npm run build:examples
 ```
+
+For the Earth Engine example, set `VITE_GEE_OAUTH_CLIENT_ID` in `.env`.
+`VITE_GEE_PROJECT_ID` is optional; when it is omitted, users can enter their
+own Earth Engine-enabled Google Cloud project ID in the GeoAgent panel.

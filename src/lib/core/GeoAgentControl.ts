@@ -409,10 +409,6 @@ export class GeoAgentControl implements IControl {
     return `${this.options.storagePrefix}.bedrock.region`;
   }
 
-  private earthEngineClientIdStorageKey(): string {
-    return `${this.options.storagePrefix}.earthEngine.oauthClientId`;
-  }
-
   private earthEngineProjectIdStorageKey(): string {
     return `${this.options.storagePrefix}.earthEngine.projectId`;
   }
@@ -513,11 +509,8 @@ export class GeoAgentControl implements IControl {
 
       <details class="geoagent-earth-engine">
         <summary>Earth Engine</summary>
+        <input class="geoagent-ee-client-id" type="hidden" />
         <div class="geoagent-earth-engine-grid">
-          <label>
-            OAuth Client ID
-            <input class="geoagent-ee-client-id" autocomplete="off" placeholder="Google OAuth client ID" />
-          </label>
           <label>
             Project ID
             <input class="geoagent-ee-project-id" autocomplete="off" placeholder="Earth Engine project" />
@@ -626,7 +619,6 @@ export class GeoAgentControl implements IControl {
       return;
     }
     const oauthClientId = firstValue(
-      storageGet(this.earthEngineClientIdStorageKey()),
       this.options.earthEngine?.oauthClientId,
     );
     const projectId = firstValue(
@@ -645,11 +637,6 @@ export class GeoAgentControl implements IControl {
     }
     const oauthClientId = this.ui.earthEngineClientIdInput.value.trim();
     const projectId = this.ui.earthEngineProjectIdInput.value.trim();
-    if (oauthClientId) {
-      storageSet(this.earthEngineClientIdStorageKey(), oauthClientId);
-    } else {
-      storageRemove(this.earthEngineClientIdStorageKey());
-    }
     if (projectId) {
       storageSet(this.earthEngineProjectIdStorageKey(), projectId);
     } else {
@@ -674,9 +661,14 @@ export class GeoAgentControl implements IControl {
     const earthEngine = this.state.data?.earthEngine as
       | { initialized?: boolean; layerCount?: number }
       | undefined;
-    if (!oauthClientId || !projectId) {
+    if (!oauthClientId) {
       this.ui.earthEngineStatus.textContent =
-        'Enter OAuth and project values before running Earth Engine tools.';
+        'OAuth Client ID is not configured by this app. Set VITE_GEE_OAUTH_CLIENT_ID before running Earth Engine tools.';
+      return;
+    }
+    if (!projectId) {
+      this.ui.earthEngineStatus.textContent =
+        'Enter an Earth Engine project ID before running Earth Engine tools.';
       return;
     }
     this.ui.earthEngineStatus.textContent = earthEngine
@@ -737,9 +729,6 @@ export class GeoAgentControl implements IControl {
       this.invalidateAgent();
       this.updateControls();
       this.emit('statechange');
-    });
-    ui.earthEngineClientIdInput.addEventListener('input', () => {
-      this.applyEarthEngineSettings();
     });
     ui.earthEngineProjectIdInput.addEventListener('input', () => {
       this.applyEarthEngineSettings();

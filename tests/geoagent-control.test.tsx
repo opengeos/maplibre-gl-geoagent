@@ -272,7 +272,6 @@ describe("GeoAgentControl", () => {
 
   it("shows Earth Engine settings in the main panel when enabled", () => {
     const storagePrefix = "geoagent.ee.panel";
-    sessionStorage.removeItem(`${storagePrefix}.earthEngine.oauthClientId`);
     sessionStorage.removeItem(`${storagePrefix}.earthEngine.projectId`);
     const map = new MockMap();
     const control = new GeoAgentControl({
@@ -296,15 +295,16 @@ describe("GeoAgentControl", () => {
 
     expect(details?.hidden).toBe(false);
     expect(details?.open).toBe(false);
+    expect(clientInput?.type).toBe("hidden");
     expect(clientInput?.value).toBe("initial-client");
     expect(projectInput?.value).toBe("initial-project");
 
-    clientInput!.value = "updated-client";
-    clientInput?.dispatchEvent(new Event("input", { bubbles: true }));
+    projectInput!.value = "updated-project";
+    projectInput?.dispatchEvent(new Event("input", { bubbles: true }));
 
     expect(
-      sessionStorage.getItem(`${storagePrefix}.earthEngine.oauthClientId`),
-    ).toBe("updated-client");
+      sessionStorage.getItem(`${storagePrefix}.earthEngine.projectId`),
+    ).toBe("updated-project");
 
     control.onRemove();
     map.cleanup();
@@ -327,7 +327,7 @@ describe("GeoAgentControl", () => {
 
     expect(details?.hidden).toBe(false);
     expect(details?.open).toBe(true);
-    expect(status?.textContent).toContain("Enter OAuth and project values");
+    expect(status?.textContent).toContain("OAuth Client ID is not configured");
 
     control.onRemove();
     map.cleanup();

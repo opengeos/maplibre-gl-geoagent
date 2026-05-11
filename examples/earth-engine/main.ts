@@ -7,17 +7,17 @@ import 'maplibre-gl-layer-control/style.css';
 
 const STORAGE_PREFIX = 'maplibre-gl-geoagent.ee-example';
 
-function settingValue(name: string, envValue: unknown): string {
+function envString(value: unknown): string {
+  return typeof value === 'string' ? value : '';
+}
+
+function projectValue(envValue: unknown): string {
   const params = new URLSearchParams(window.location.search);
-  const panelKey =
-    name === 'ee_client_id'
-      ? `${STORAGE_PREFIX}.earthEngine.oauthClientId`
-      : `${STORAGE_PREFIX}.earthEngine.projectId`;
   return (
-    params.get(name) ||
-    (typeof envValue === 'string' ? envValue : '') ||
-    sessionStorage.getItem(panelKey) ||
-    localStorage.getItem(`${STORAGE_PREFIX}.${name}`) ||
+    params.get('ee_project_id') ||
+    envString(envValue) ||
+    sessionStorage.getItem(`${STORAGE_PREFIX}.earthEngine.projectId`) ||
+    localStorage.getItem(`${STORAGE_PREFIX}.ee_project_id`) ||
     ''
   );
 }
@@ -46,14 +46,8 @@ map.on('load', () => {
     'top-right',
   );
 
-  const oauthClientId = settingValue(
-    'ee_client_id',
-    import.meta.env.VITE_GEE_OAUTH_CLIENT_ID,
-  );
-  const projectId = settingValue(
-    'ee_project_id',
-    import.meta.env.VITE_GEE_PROJECT_ID,
-  );
+  const oauthClientId = envString(import.meta.env.VITE_GEE_OAUTH_CLIENT_ID);
+  const projectId = projectValue(import.meta.env.VITE_GEE_PROJECT_ID);
   const geoAgent = new GeoAgentControl({
     title: 'GeoAgent + Earth Engine',
     collapsed: false,
