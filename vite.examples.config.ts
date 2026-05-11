@@ -14,6 +14,7 @@ export default defineConfig({
       input: {
         main: resolve(__dirname, 'index.html'),
         basic: resolve(__dirname, 'examples/basic/index.html'),
+        earthEngine: resolve(__dirname, 'examples/earth-engine/index.html'),
         react: resolve(__dirname, 'examples/react/index.html'),
       },
     },

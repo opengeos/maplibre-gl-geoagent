@@ -16,6 +16,20 @@ npm run dev
 
 Open <http://localhost:5173/examples/basic/>.
 
+## Earth Engine Example
+
+A vanilla TypeScript example with Google Earth Engine tools enabled. Provide
+browser OAuth and project values with the on-page form, URL parameters, or Vite
+environment variables:
+
+```bash
+VITE_GEE_OAUTH_CLIENT_ID=your-client-id \
+VITE_GEE_PROJECT_ID=your-project-id \
+npm run dev
+```
+
+Open <http://localhost:5173/examples/earth-engine/>.
+
 ## React Example
 
 A React example demonstrating `GeoAgentControlReact` and `useGeoAgentState`.

@@ -14,6 +14,12 @@ export {
 } from './lib/core/maplibre-tools';
 
 export type {
+  EarthEngineOptions,
+  EarthEngineLayerRecord,
+  GeeDataset,
+} from './lib/core/earth-engine';
+
+export type {
   GeoAgentControlEvent,
   GeoAgentControlEventHandler,
   GeoAgentControlOptions,

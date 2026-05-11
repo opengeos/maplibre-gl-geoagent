@@ -101,6 +101,7 @@
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.92.0",
+    "@google/earthengine": "^1.7.25",
     "@google/genai": "^1.52.0",
     "@strands-agents/sdk": "^1.1.0",
     "dompurify": "^3.4.2",

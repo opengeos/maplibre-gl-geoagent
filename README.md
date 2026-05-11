@@ -14,6 +14,7 @@ inspect and operate on the live map through dedicated browser tools.
 - Collapsible MapLibre control with a floating chat panel
 - Browser provider UI for OpenAI Responses, OpenAI Chat, Anthropic, Google Gemini, and Amazon Bedrock
 - Map tools for camera movement, projection, basemaps, markers, GeoJSON, XYZ tiles, layer visibility, opacity, feature queries, screenshots, and layer cleanup
+- Optional Google Earth Engine tools for catalog search, OAuth initialization, dataset tile layers, normalized difference indexes, visualization updates, snippets, and bounded statistics
 - Optional MapLibre JavaScript execution tool, disabled by default
 - Destructive layer removal tools gated behind a separate toggle
 - Copy the visible conversation log as Markdown
@@ -134,6 +135,24 @@ Converse model ID, and set the AWS region. The default Bedrock model is
 | `allowDestructiveToolsDefault` | `boolean`                                                      | `true`                |
 | `showPermissionToggles`        | `boolean`                                                      | `false`               |
 | `basemaps`                     | `Record<string, string \| StyleSpecification>`                 | built-in basemaps     |
+| `earthEngine`                  | `EarthEngineOptions`                                           | `undefined`           |
+
+### Earth Engine Options
+
+```typescript
+new GeoAgentControl({
+  earthEngine: {
+    oauthClientId: "YOUR_GOOGLE_OAUTH_CLIENT_ID",
+    projectId: "your-earth-engine-project",
+    includeCommunityCatalog: true,
+  },
+});
+```
+
+The Earth Engine integration uses browser OAuth through the official
+`@google/earthengine` package. Service account private keys are intentionally
+not supported in this browser-only package. Use a backend proxy if your
+deployment needs service account access.
 
 ## Browser Credentials
 
@@ -166,6 +185,14 @@ Change the basemap to dark, then get the current map state.
 
 ```text
 Add the GeoJSON URL https://raw.githubusercontent.com/plotly/datasets/master/geojson-counties-fips.json as US counties.
+```
+
+```text
+Search Google Earth Engine for SRTM elevation datasets, then add the SRTM image with a terrain palette.
+```
+
+```text
+Load Sentinel-2 surface reflectance for Knoxville in June 2024 and calculate NDVI using B8 and B4.
 ```
 
 ```text

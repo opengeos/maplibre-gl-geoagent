@@ -253,6 +253,38 @@ body.geoagent-panel-resizing {
   display: none;
 }
 
+.geoagent-earth-engine {
+  border: 1px solid #d7dde5;
+  border-radius: 6px;
+  background: #f8fafc;
+}
+
+.geoagent-earth-engine[hidden] {
+  display: none;
+}
+
+.geoagent-earth-engine summary {
+  padding: 8px 10px;
+  color: #17202a;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.geoagent-earth-engine-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  padding: 0 10px 8px;
+}
+
+.geoagent-earth-engine-status {
+  padding: 0 10px 10px;
+  color: #64748b;
+  font-size: 12px;
+  line-height: 1.35;
+}
+
 .geoagent-toggle-row {
   display: flex;
   flex-wrap: wrap;
@@ -470,6 +502,7 @@ body.geoagent-panel-resizing {
 }
 
 .geoagent-panel button.geoagent-send,
+.geoagent-panel button.geoagent-cancel,
 .geoagent-panel button.geoagent-copy,
 .geoagent-panel button.geoagent-clear {
   min-height: 36px;
@@ -502,6 +535,10 @@ body.geoagent-panel-resizing {
   }
 
   .geoagent-settings-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .geoagent-earth-engine-grid {
     grid-template-columns: 1fr;
   }
 

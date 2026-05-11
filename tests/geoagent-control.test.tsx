@@ -270,6 +270,69 @@ describe("GeoAgentControl", () => {
     map.cleanup();
   });
 
+  it("shows Earth Engine settings in the main panel when enabled", () => {
+    const storagePrefix = "geoagent.ee.panel";
+    sessionStorage.removeItem(`${storagePrefix}.earthEngine.oauthClientId`);
+    sessionStorage.removeItem(`${storagePrefix}.earthEngine.projectId`);
+    const map = new MockMap();
+    const control = new GeoAgentControl({
+      storagePrefix,
+      earthEngine: {
+        oauthClientId: "initial-client",
+        projectId: "initial-project",
+      },
+    });
+    const container = control.onAdd(map as never);
+    map.controlStack.appendChild(container);
+    const details = map.mapContainer.querySelector<HTMLDetailsElement>(
+      ".geoagent-earth-engine",
+    );
+    const clientInput = map.mapContainer.querySelector<HTMLInputElement>(
+      ".geoagent-ee-client-id",
+    );
+    const projectInput = map.mapContainer.querySelector<HTMLInputElement>(
+      ".geoagent-ee-project-id",
+    );
+
+    expect(details?.hidden).toBe(false);
+    expect(details?.open).toBe(false);
+    expect(clientInput?.value).toBe("initial-client");
+    expect(projectInput?.value).toBe("initial-project");
+
+    clientInput!.value = "updated-client";
+    clientInput?.dispatchEvent(new Event("input", { bubbles: true }));
+
+    expect(
+      sessionStorage.getItem(`${storagePrefix}.earthEngine.oauthClientId`),
+    ).toBe("updated-client");
+
+    control.onRemove();
+    map.cleanup();
+  });
+
+  it("opens Earth Engine settings when credentials are missing", () => {
+    const map = new MockMap();
+    const control = new GeoAgentControl({
+      storagePrefix: "geoagent.ee.missing",
+      earthEngine: {},
+    });
+    const container = control.onAdd(map as never);
+    map.controlStack.appendChild(container);
+    const details = map.mapContainer.querySelector<HTMLDetailsElement>(
+      ".geoagent-earth-engine",
+    );
+    const status = map.mapContainer.querySelector<HTMLDivElement>(
+      ".geoagent-earth-engine-status",
+    );
+
+    expect(details?.hidden).toBe(false);
+    expect(details?.open).toBe(true);
+    expect(status?.textContent).toContain("Enter OAuth and project values");
+
+    control.onRemove();
+    map.cleanup();
+  });
+
   it("shows and persists the Bedrock region field for the Bedrock provider", () => {
     const map = new MockMap();
     const control = new GeoAgentControl({ defaultProvider: "bedrock" });
@@ -722,6 +785,7 @@ describe("MapLibreAgentTools native tools", () => {
         "set_layer_filter",
         "update_geojson_source",
         "query_source_features",
+        "add_basemap",
         "add_image_layer",
         "add_terrain",
         "clear_terrain",
@@ -922,6 +986,45 @@ describe("MapLibreAgentTools native tools", () => {
     expect(map.sky).toEqual({ "sky-color": "#88ccee" });
     expect(map.getSource("buildings-source")).toMatchObject({ type: "vector" });
     expect(map.getLayer("buildings-3d")).toBeTruthy();
+  });
+
+  it("adds raster basemaps without replacing the current style", async () => {
+    const { agent, map } = createAgent();
+
+    await agent.runCommand("add_geojson_data", {
+      name: "points",
+      data: pointData,
+      style: { color: "#ff0000" },
+    });
+    const result = await agent.runCommand("add_basemap", {
+      provider: "google_satellite",
+    });
+
+    expect(result).toBe("Added basemap Google Satellite.");
+    expect(map.getSource("google-satellite-source")).toMatchObject({
+      type: "raster",
+      tiles: ["https://mt1.google.com/vt/lyrs=s&x={x}&y={y}&z={z}"],
+    });
+    expect(map.getLayer("google-satellite")).toMatchObject({
+      type: "raster",
+      source: "google-satellite-source",
+    });
+    expect(map.getLayer("points-point")).toBeTruthy();
+  });
+
+  it("does not hang forever when style.load is not emitted", async () => {
+    vi.useFakeTimers();
+    try {
+      const { agent, map } = createAgent();
+      map.once = vi.fn();
+
+      const result = agent.runCommand("change_basemap", { style: "osm" });
+      await vi.advanceTimersByTimeAsync(9000);
+
+      await expect(result).resolves.toBe("Basemap changed to osm.");
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("honors destructive-tool gating for arbitrary native layer removal", async () => {

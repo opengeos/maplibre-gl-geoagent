@@ -9,6 +9,11 @@ import maplibregl, {
   type StyleSpecification,
 } from "maplibre-gl";
 import { z } from "zod";
+import {
+  buildGeeVisParams,
+  EarthEngineService,
+  type EarthEngineOptions,
+} from "./earth-engine";
 
 export type JsonObject = Record<string, unknown>;
 export type BBox = [number, number, number, number];
@@ -22,7 +27,7 @@ interface GeoJsonLayerDefinition {
 }
 
 interface Overlay {
-  kind: "geojson" | "raster" | "marker" | "native";
+  kind: "geojson" | "raster" | "basemap" | "marker" | "native" | "gee";
   name: string;
   sourceIds: string[];
   layerIds: string[];
@@ -35,6 +40,7 @@ interface Overlay {
   layerSpecs?: Array<{ layer: LayerSpecification; beforeId?: string }>;
   terrain?: { source: string; exaggeration?: number };
   sky?: JsonObject;
+  geeLayerName?: string;
 }
 
 export const DEFAULT_BASEMAPS: Record<string, string | StyleSpecification> = {
@@ -61,6 +67,29 @@ export const DEFAULT_BASEMAPS: Record<string, string | StyleSpecification> = {
     layers: [{ id: "osm", type: "raster", source: "osm" }],
   },
 };
+
+const RASTER_BASEMAPS: Record<
+  string,
+  { name: string; url: string; attribution: string }
+> = {
+  google_satellite: {
+    name: "Google Satellite",
+    url: "https://mt1.google.com/vt/lyrs=s&x={x}&y={y}&z={z}",
+    attribution: "Google",
+  },
+  google_hybrid: {
+    name: "Google Hybrid",
+    url: "https://mt1.google.com/vt/lyrs=y&x={x}&y={y}&z={z}",
+    attribution: "Google",
+  },
+  esri_world_imagery: {
+    name: "Esri World Imagery",
+    url: "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
+    attribution: "Esri, Maxar, Earthstar Geographics, and the GIS User Community",
+  },
+};
+
+const MAP_EVENT_TIMEOUT_MS = 8000;
 
 export function numberArg(args: JsonObject, key: string): number {
   const value = args[key];
@@ -330,6 +359,8 @@ export interface MapLibreAgentToolsOptions {
   basemaps?: Record<string, string | StyleSpecification>;
   allowCodeExecution: () => boolean;
   allowDestructiveTools: () => boolean;
+  earthEngine?: EarthEngineOptions;
+  onStateDataChange?: (data: Record<string, unknown>) => void;
 }
 
 export class MapLibreAgentTools {
@@ -337,13 +368,25 @@ export class MapLibreAgentTools {
   private readonly basemaps: Record<string, string | StyleSpecification>;
   private readonly allowCodeExecution: () => boolean;
   private readonly allowDestructiveTools: () => boolean;
+  private readonly onStateDataChange?: (data: Record<string, unknown>) => void;
   private readonly overlays = new globalThis.Map<string, Overlay>();
+  private readonly earthEngine?: EarthEngineService;
 
   constructor(map: MapLibreMap, options: MapLibreAgentToolsOptions) {
     this.map = map;
     this.basemaps = { ...DEFAULT_BASEMAPS, ...options.basemaps };
     this.allowCodeExecution = options.allowCodeExecution;
     this.allowDestructiveTools = options.allowDestructiveTools;
+    this.onStateDataChange = options.onStateDataChange;
+    if (options.earthEngine && options.earthEngine.enabled !== false) {
+      this.earthEngine = new EarthEngineService(options.earthEngine);
+      this.publishEarthEngineState();
+    }
+  }
+
+  updateEarthEngineOptions(options: EarthEngineOptions): void {
+    this.earthEngine?.updateOptions(options);
+    this.publishEarthEngineState();
   }
 
   destroy(): void {
@@ -373,6 +416,32 @@ export class MapLibreAgentTools {
       .describe(
         "Four image/video corner coordinates: top-left, top-right, bottom-right, bottom-left.",
       );
+    const geeCommonLoadSchema = {
+      asset_id: z.string().describe("Google Earth Engine asset id."),
+      layer_name: z.string().optional(),
+      asset_type: z
+        .enum(["Image", "ImageCollection", "FeatureCollection"])
+        .optional(),
+      start_date: z.string().optional().describe("YYYY-MM-DD start date."),
+      end_date: z.string().optional().describe("YYYY-MM-DD end date."),
+      bbox: z.string().optional().describe("west,south,east,north in WGS84."),
+      bounds_collection_asset_id: z.string().optional(),
+      bounds_filter_property: z.string().optional(),
+      bounds_filter_value: z.string().optional(),
+      cloud_cover: z.number().optional(),
+      cloud_property: z.string().optional(),
+      reducer: z
+        .enum(["mosaic", "median", "mean", "min", "max", "first", "mode"])
+        .optional(),
+      min_value: z.number().optional(),
+      max_value: z.number().optional(),
+      palette: z.string().optional(),
+      clip_collection_asset_id: z.string().optional(),
+      clip_filter_property: z.string().optional(),
+      clip_filter_value: z.string().optional(),
+      oauth_client_id: z.string().optional(),
+      project_id: z.string().optional(),
+    };
     const tools: Tool[] = [
       tool({
         name: "list_layers",
@@ -444,9 +513,25 @@ export class MapLibreAgentTools {
         callback: (input) => this.runCommand("zoom_to_bounds", input),
       }),
       tool({
+        name: "add_basemap",
+        description:
+          "Add a raster basemap, such as Google satellite imagery, beneath existing user overlays without replacing the current MapLibre style.",
+        inputSchema: z.object({
+          provider: z
+            .enum(["google_satellite", "google_hybrid", "esri_world_imagery"])
+            .optional()
+            .describe("Known raster basemap provider."),
+          url: z.string().optional().describe("Custom XYZ tile URL template."),
+          name: z.string().optional().describe("Layer name."),
+          attribution: z.string().optional(),
+          opacity: z.number().min(0).max(1).optional(),
+        }),
+        callback: (input) => this.runCommand("add_basemap", input),
+      }),
+      tool({
         name: "change_basemap",
         description:
-          "Change the browser MapLibre basemap style by URL or known style id.",
+          "Replace the entire browser MapLibre style by URL or known style id. Prefer add_basemap for satellite imagery or raster background layers.",
         inputSchema: z.object({
           style: z.string().describe("Known style id or MapLibre style URL."),
         }),
@@ -774,6 +859,25 @@ export class MapLibreAgentTools {
     ];
 
     if (this.allowCodeExecution()) {
+      if (this.earthEngine) {
+        tools.push(
+          tool({
+            name: "run_gee_javascript_snippet",
+            description:
+              "Run a constrained Earth Engine JavaScript snippet that adds one or more MapLibre raster tile layers.",
+            inputSchema: z.object({
+              code: z
+                .string()
+                .describe(
+                  "JavaScript using ee plus Map.addLayer(...), addLayer(...), getEeLayer(name), and listEeLayers().",
+                ),
+              description: z.string().optional(),
+            }),
+            callback: (input) =>
+              this.runCommand("run_gee_javascript_snippet", input),
+          }),
+        );
+      }
       tools.push(
         tool({
           name: "run_maplibre_script",
@@ -788,6 +892,121 @@ export class MapLibreAgentTools {
             description: z.string().optional(),
           }),
           callback: (input) => this.runCommand("run_maplibre_script", input),
+        }),
+      );
+    }
+
+    if (this.earthEngine) {
+      tools.push(
+        tool({
+          name: "search_gee_datasets",
+          description:
+            "Search official and community Google Earth Engine data catalogs.",
+          inputSchema: z.object({
+            query: z.string().optional(),
+            category: z.string().optional(),
+            data_type: z.string().optional(),
+            source: z.enum(["official", "community"]).optional(),
+            max_results: z.number().optional(),
+            include_community: z.boolean().optional(),
+          }),
+          callback: (input) => this.runCommand("search_gee_datasets", input),
+        }),
+        tool({
+          name: "get_gee_dataset_info",
+          description:
+            "Return catalog metadata for a Google Earth Engine asset id.",
+          inputSchema: z.object({
+            asset_id: z.string(),
+            include_community: z.boolean().optional(),
+          }),
+          callback: (input) => this.runCommand("get_gee_dataset_info", input),
+        }),
+        tool({
+          name: "summarize_gee_catalog",
+          description: "Summarize Earth Engine catalog counts by category.",
+          inputSchema: z.object({
+            include_community: z.boolean().optional(),
+          }),
+          callback: (input) => this.runCommand("summarize_gee_catalog", input),
+        }),
+        tool({
+          name: "initialize_earth_engine",
+          description:
+            "Authenticate and initialize Google Earth Engine with browser OAuth.",
+          inputSchema: z.object({
+            oauth_client_id: z.string().optional(),
+            project_id: z.string().optional(),
+            force: z.boolean().optional(),
+          }),
+          callback: (input) =>
+            this.runCommand("initialize_earth_engine", input),
+        }),
+        tool({
+          name: "load_gee_dataset",
+          description:
+            "Load a Google Earth Engine Image, ImageCollection, or FeatureCollection into the browser map as raster tiles.",
+          inputSchema: z.object({
+            ...geeCommonLoadSchema,
+            bands: z.string().optional(),
+            diagnose: z.boolean().optional(),
+          }),
+          callback: (input) => this.runCommand("load_gee_dataset", input),
+        }),
+        tool({
+          name: "calculate_gee_normalized_difference",
+          description:
+            "Calculate and display an Earth Engine normalized difference index such as NDVI, NDWI, MNDWI, or NBR.",
+          inputSchema: z.object({
+            ...geeCommonLoadSchema,
+            positive_band: z.string(),
+            negative_band: z.string(),
+            index_name: z.string().optional(),
+          }),
+          callback: (input) =>
+            this.runCommand("calculate_gee_normalized_difference", input),
+        }),
+        tool({
+          name: "list_loaded_gee_layers",
+          description:
+            "List Earth Engine layers registered by the browser GeoAgent.",
+          inputSchema: z.object({}),
+          callback: () => this.runCommand("list_loaded_gee_layers"),
+        }),
+        tool({
+          name: "set_gee_layer_visualization",
+          description:
+            "Re-render a loaded Earth Engine layer with updated visualization parameters.",
+          inputSchema: z.object({
+            layer_name: z.string(),
+            bands: z.string().optional(),
+            min_value: z.number().optional(),
+            max_value: z.number().optional(),
+            palette: z.string().optional(),
+            output_layer_name: z.string().optional(),
+          }),
+          callback: (input) =>
+            this.runCommand("set_gee_layer_visualization", input),
+        }),
+        tool({
+          name: "calculate_gee_layer_statistics",
+          description:
+            "Calculate bounded server-side statistics for a loaded Earth Engine image layer.",
+          inputSchema: z.object({
+            layer_name: z.string(),
+            band: z.string().optional(),
+            statistics: z.string().optional(),
+            scale: z.number().optional(),
+            max_pixels: z.number().optional(),
+            best_effort: z.boolean().optional(),
+            tile_scale: z.number().optional(),
+            timeout_seconds: z.number().optional(),
+            region_collection_asset_id: z.string().optional(),
+            region_filter_property: z.string().optional(),
+            region_filter_value: z.string().optional(),
+          }),
+          callback: (input) =>
+            this.runCommand("calculate_gee_layer_statistics", input),
         }),
       );
     }
@@ -892,6 +1111,34 @@ export class MapLibreAgentTools {
       return "Zoomed to bounds.";
     }
 
+    if (command === "add_basemap") {
+      const providerKey = stringArg(args, "provider")
+        .trim()
+        .toLowerCase();
+      const provider = providerKey ? RASTER_BASEMAPS[providerKey] : undefined;
+      const url = stringArg(args, "url") || provider?.url;
+      if (!url) {
+        throw new Error(
+          "add_basemap requires provider or url. Known providers: google_satellite, google_hybrid, esri_world_imagery.",
+        );
+      }
+      const name =
+        stringArg(args, "name") ||
+        provider?.name ||
+        providerKey ||
+        "Raster Basemap";
+      await this.addBasemapOverlay({
+        name,
+        url,
+        attribution: stringArg(args, "attribution") || provider?.attribution,
+        opacity:
+          args.opacity == null
+            ? undefined
+            : Math.max(0, Math.min(1, Number(args.opacity))),
+      });
+      return `Added basemap ${name}.`;
+    }
+
     if (command === "change_basemap") {
       const rawStyle = stringArg(args, "style", "liberty").trim();
       let style = this.basemaps[rawStyle.toLowerCase()] ?? rawStyle;
@@ -899,9 +1146,7 @@ export class MapLibreAgentTools {
         style = this.basemaps[style];
       }
       this.map.setStyle(style);
-      await new Promise<void>((resolve) =>
-        this.map.once("style.load", () => resolve()),
-      );
+      await this.waitForMapEvent("style.load");
       await this.restoreOverlaysAfterStyleChange();
       return `Basemap changed to ${rawStyle}.`;
     }
@@ -1317,6 +1562,232 @@ export class MapLibreAgentTools {
       return "Cleared user-added layers.";
     }
 
+    if (command === "search_gee_datasets") {
+      return this.requireEarthEngine().searchDatasets({
+        query: stringArg(args, "query"),
+        category: stringArg(args, "category") || undefined,
+        data_type: stringArg(args, "data_type") || undefined,
+        source: stringArg(args, "source") || undefined,
+        max_results: args.max_results == null ? undefined : Number(args.max_results),
+        include_community:
+          args.include_community == null ? undefined : Boolean(args.include_community),
+      });
+    }
+
+    if (command === "get_gee_dataset_info") {
+      const assetId = stringArg(args, "asset_id");
+      if (!assetId) {
+        throw new Error("get_gee_dataset_info requires asset_id.");
+      }
+      return this.requireEarthEngine().getDatasetInfo(
+        assetId,
+        args.include_community == null ? true : Boolean(args.include_community),
+      );
+    }
+
+    if (command === "summarize_gee_catalog") {
+      return this.requireEarthEngine().summarizeCatalog(
+        args.include_community == null ? true : Boolean(args.include_community),
+      );
+    }
+
+    if (command === "initialize_earth_engine") {
+      const result = await this.requireEarthEngine().initialize({
+        oauthClientId: stringArg(args, "oauth_client_id") || undefined,
+        projectId: stringArg(args, "project_id") || undefined,
+        force: Boolean(args.force),
+      });
+      this.publishEarthEngineState();
+      return result;
+    }
+
+    if (command === "load_gee_dataset") {
+      const layer = await this.requireEarthEngine().buildDatasetLayer(args);
+      const tileUrl = await this.requireEarthEngine().getTileUrl(
+        layer.eeObject as never,
+        layer.vis_params,
+      );
+      await this.addGeeRasterOverlay({
+        name: layer.layer_name,
+        url: tileUrl,
+      });
+      this.requireEarthEngine().registerLayer({
+        name: layer.layer_name,
+        asset_id: layer.asset_id,
+        asset_type: layer.asset_type,
+        object_type: String(layer.asset_type),
+        vis_params: layer.vis_params,
+        tile_url: tileUrl,
+        source: "earth_engine",
+        metadata: {
+          composite_method: layer.composite_method,
+          requested_reducer: layer.requested_reducer,
+          rendered_band: layer.rendered_band,
+          bbox: layer.bbox,
+          bounds: layer.bounds,
+          clip: layer.clip,
+        },
+        eeObject: layer.eeObject,
+      });
+      if (layer.bbox) {
+        this.zoomToGeoJsonBounds(layer.bbox as BBox);
+      }
+      this.publishEarthEngineState();
+      return {
+        success: true,
+        asset_id: layer.asset_id,
+        asset_type: layer.asset_type,
+        layer_name: layer.layer_name,
+        composite_method: layer.composite_method,
+        requested_reducer: layer.requested_reducer,
+        rendered_band: layer.rendered_band,
+        diagnostics: layer.diagnostics,
+        bbox: layer.bbox,
+        bounds: layer.bounds,
+        earth_engine_javascript_snippet: this.buildLoadGeeDatasetSnippet(args),
+        vis_params: layer.vis_params,
+        tile_url: tileUrl,
+        clip: layer.clip,
+      };
+    }
+
+    if (command === "calculate_gee_normalized_difference") {
+      const layer = await this.requireEarthEngine().buildNormalizedDifferenceLayer(
+        args,
+      );
+      const tileUrl = await this.requireEarthEngine().getTileUrl(
+        layer.eeObject as never,
+        layer.vis_params,
+      );
+      await this.addGeeRasterOverlay({
+        name: layer.layer_name,
+        url: tileUrl,
+      });
+      this.requireEarthEngine().registerLayer({
+        name: layer.layer_name,
+        asset_id: layer.asset_id,
+        asset_type: layer.asset_type,
+        object_type: "Image",
+        vis_params: layer.vis_params,
+        tile_url: tileUrl,
+        source: "earth_engine",
+        metadata: {
+          index_name: layer.index_name,
+          formula: layer.formula,
+          bands: layer.bands,
+          composite_method: layer.composite_method,
+          requested_reducer: layer.requested_reducer,
+          bbox: layer.bbox,
+          bounds: layer.bounds,
+          clip: layer.clip,
+        },
+        eeObject: layer.eeObject,
+      });
+      if (layer.bbox) {
+        this.zoomToGeoJsonBounds(layer.bbox as BBox);
+      }
+      this.publishEarthEngineState();
+      return {
+        success: true,
+        asset_id: layer.asset_id,
+        asset_type: layer.asset_type,
+        layer_name: layer.layer_name,
+        index_name: layer.index_name,
+        formula: layer.formula,
+        bands: layer.bands,
+        composite_method: layer.composite_method,
+        requested_reducer: layer.requested_reducer,
+        vis_params: layer.vis_params,
+        bbox: layer.bbox,
+        bounds: layer.bounds,
+        tile_url: tileUrl,
+        earth_engine_javascript_snippet: this.buildNormalizedDifferenceSnippet(args),
+        clip: layer.clip,
+      };
+    }
+
+    if (command === "list_loaded_gee_layers") {
+      const layers = this.requireEarthEngine().listLoadedLayers();
+      return { count: layers.length, layers };
+    }
+
+    if (command === "set_gee_layer_visualization") {
+      const result = await this.requireEarthEngine().setLayerVisualization(args);
+      await this.addGeeRasterOverlay({
+        name: result.layer_name,
+        url: result.tile_url,
+      });
+      this.requireEarthEngine().registerLayer({
+        name: result.layer_name,
+        object_type: "EarthEngineObject",
+        vis_params: result.vis_params,
+        tile_url: result.tile_url,
+        source: "earth_engine",
+        eeObject: result.eeObject,
+      });
+      if (result.source_layer_name !== result.layer_name) {
+        this.requireEarthEngine().unregisterLayer(result.source_layer_name);
+      }
+      this.publishEarthEngineState();
+      return {
+        success: result.success,
+        layer_name: result.layer_name,
+        source_layer_name: result.source_layer_name,
+        vis_params: result.vis_params,
+        tile_url: result.tile_url,
+      };
+    }
+
+    if (command === "calculate_gee_layer_statistics") {
+      try {
+        return await this.requireEarthEngine().calculateLayerStatistics(args);
+      } catch (error) {
+        return {
+          success: false,
+          error: error instanceof Error ? error.message : String(error),
+          layer_name: stringArg(args, "layer_name"),
+          band: stringArg(args, "band") || null,
+          statistics: stringArg(args, "statistics", "mean"),
+          scale: Number(args.scale ?? 1000),
+          max_pixels: Number(args.max_pixels ?? 100000000),
+          best_effort: args.best_effort !== false,
+          tile_scale: Number(args.tile_scale ?? 4),
+          timeout_seconds: Number(args.timeout_seconds ?? 60),
+          hint:
+            "For large regions, retry with a coarser scale such as 2000 or 5000 meters, or provide a smaller region.",
+        };
+      }
+    }
+
+    if (command === "run_gee_javascript_snippet") {
+      if (!this.allowCodeExecution()) {
+        throw new Error("Earth Engine JavaScript execution is disabled.");
+      }
+      const code = stringArg(args, "code").trim();
+      const result = await this.requireEarthEngine().runSnippet(
+        code,
+        async (eeObject, visParams, name) => {
+          const tileUrl = await this.requireEarthEngine().getTileUrl(
+            eeObject as never,
+            visParams,
+          );
+          await this.addGeeRasterOverlay({ name, url: tileUrl });
+          this.requireEarthEngine().registerLayer({
+            name,
+            object_type:
+              (eeObject as { constructor?: { name?: string } })?.constructor
+                ?.name ?? typeof eeObject,
+            vis_params: visParams,
+            tile_url: tileUrl,
+            source: "earth_engine",
+            eeObject,
+          });
+        },
+      );
+      this.publishEarthEngineState();
+      return { ...result, description: stringArg(args, "description") };
+    }
+
     if (command === "run_maplibre_script") {
       if (!this.allowCodeExecution()) {
         throw new Error("MapLibre JavaScript execution is disabled.");
@@ -1327,14 +1798,43 @@ export class MapLibreAgentTools {
     throw new Error(`Unsupported command: ${command}`);
   }
 
-  private waitForMapIdle(): Promise<void> {
+  private waitForMapEvent(eventName: string): Promise<boolean> {
     return new Promise((resolve) => {
-      if (this.map.loaded()) {
-        resolve();
-        return;
-      }
-      this.map.once("idle", () => resolve());
+      let settled = false;
+      const finish = (value: boolean) => {
+        if (settled) {
+          return;
+        }
+        settled = true;
+        window.clearTimeout(timeoutId);
+        resolve(value);
+      };
+      const timeoutId = window.setTimeout(
+        () => finish(false),
+        MAP_EVENT_TIMEOUT_MS,
+      );
+      this.map.once(eventName, () => finish(true));
     });
+  }
+
+  private async waitForMapIdle(): Promise<void> {
+    if (this.map.loaded()) {
+      return;
+    }
+    await this.waitForMapEvent("idle");
+  }
+
+  private firstUserOverlayLayerId(excludingName?: string): string | undefined {
+    for (const overlay of this.overlays.values()) {
+      if (overlay.name === excludingName || overlay.kind === "basemap") {
+        continue;
+      }
+      const layerId = overlay.layerIds.find((id) => this.map.getLayer(id));
+      if (layerId) {
+        return layerId;
+      }
+    }
+    return undefined;
   }
 
   private uniqueSourceId(baseId: string): string {
@@ -1429,6 +1929,10 @@ export class MapLibreAgentTools {
       }
     }
     overlay.marker?.remove();
+    if (overlay.kind === "gee" && overlay.geeLayerName) {
+      this.earthEngine?.unregisterLayer(overlay.geeLayerName);
+      this.publishEarthEngineState();
+    }
     this.overlays.delete(key);
     return true;
   }
@@ -1521,6 +2025,28 @@ export class MapLibreAgentTools {
     for (const name of Array.from(this.overlays.keys())) {
       this.removeOverlay(name);
     }
+  }
+
+  private requireEarthEngine(): EarthEngineService {
+    if (!this.earthEngine) {
+      throw new Error(
+        "Google Earth Engine tools are disabled. Pass earthEngine configuration when creating GeoAgentControl.",
+      );
+    }
+    return this.earthEngine;
+  }
+
+  private publishEarthEngineState(): void {
+    if (!this.earthEngine || !this.onStateDataChange) {
+      return;
+    }
+    this.onStateDataChange({
+      earthEngine: {
+        enabled: true,
+        initialized: this.earthEngine.initializedState,
+        layerCount: this.earthEngine.listLoadedLayers().length,
+      },
+    });
   }
 
   private serializableFeature(feature: MapGeoJSONFeature): JsonObject {
@@ -1661,6 +2187,73 @@ export class MapLibreAgentTools {
       attribution: overlay.attribution,
       sourceIds: [sourceId],
       layerIds: [layerId],
+    });
+  }
+
+  private async addBasemapOverlay(overlay: {
+    name: string;
+    url: string;
+    attribution?: string;
+    opacity?: number;
+  }): Promise<void> {
+    await this.waitForMapIdle();
+    this.removeOverlay(overlay.name);
+    const sourceId = this.uniqueSourceId(`${slug(overlay.name)}-source`);
+    const layerId = this.uniqueLayerBaseId(slug(overlay.name), [""]);
+    this.map.addSource(sourceId, {
+      type: "raster",
+      tiles: [overlay.url],
+      tileSize: 256,
+      attribution: overlay.attribution ?? "",
+    });
+    this.map.addLayer(
+      {
+        id: layerId,
+        type: "raster",
+        source: sourceId,
+        paint: { "raster-opacity": overlay.opacity ?? 1 },
+      },
+      this.firstUserOverlayLayerId(overlay.name),
+    );
+    this.overlays.set(overlay.name, {
+      kind: "basemap",
+      name: overlay.name,
+      url: overlay.url,
+      attribution: overlay.attribution,
+      style: { opacity: overlay.opacity ?? 1 },
+      sourceIds: [sourceId],
+      layerIds: [layerId],
+    });
+  }
+
+  private async addGeeRasterOverlay(overlay: {
+    name: string;
+    url: string;
+  }): Promise<void> {
+    await this.waitForMapIdle();
+    this.removeOverlay(overlay.name);
+    const sourceId = this.uniqueSourceId(`${slug(overlay.name)}-source`);
+    const layerId = this.uniqueLayerBaseId(slug(overlay.name), [""]);
+    this.map.addSource(sourceId, {
+      type: "raster",
+      tiles: [overlay.url],
+      tileSize: 256,
+      attribution: "Google Earth Engine",
+    });
+    this.map.addLayer({
+      id: layerId,
+      type: "raster",
+      source: sourceId,
+      paint: { "raster-opacity": 1 },
+    });
+    this.overlays.set(overlay.name, {
+      kind: "gee",
+      name: overlay.name,
+      url: overlay.url,
+      attribution: "Google Earth Engine",
+      sourceIds: [sourceId],
+      layerIds: [layerId],
+      geeLayerName: overlay.name,
     });
   }
 
@@ -2111,6 +2704,66 @@ export class MapLibreAgentTools {
     };
   }
 
+  private buildLoadGeeDatasetSnippet(args: JsonObject): string {
+    const assetId = stringArg(args, "asset_id");
+    const assetType = stringArg(args, "asset_type", "Image");
+    const visParams = buildGeeVisParams({
+      bands: args.bands,
+      min_value: args.min_value,
+      max_value: args.max_value,
+      palette: args.palette,
+      forFeatureCollection: assetType === "FeatureCollection",
+    });
+    const lines = [
+      `const assetId = ${JSON.stringify(assetId)};`,
+      `let layer = ee.${assetType || "Image"}(assetId);`,
+    ];
+    if (assetType === "ImageCollection") {
+      lines.push("let collection = ee.ImageCollection(assetId);");
+      if (args.start_date || args.end_date) {
+        lines.push(
+          `collection = collection.filterDate(${JSON.stringify(args.start_date ?? null)}, ${JSON.stringify(args.end_date ?? null)});`,
+        );
+      }
+      if (args.bbox) {
+        lines.push(
+          `collection = collection.filterBounds(ee.Geometry.Rectangle(${JSON.stringify(args.bbox)}));`,
+        );
+      }
+      const reducer = stringArg(args, "reducer", "mosaic");
+      lines.push(
+        reducer === "mosaic"
+          ? "layer = collection.mosaic();"
+          : reducer === "mode"
+            ? "layer = collection.reduce(ee.Reducer.mode());"
+            : `layer = collection.${reducer}();`,
+      );
+    }
+    lines.push(
+      `Map.addLayer(layer, ${JSON.stringify(visParams)}, ${JSON.stringify(stringArg(args, "layer_name", assetId.split("/").at(-1) ?? assetId))});`,
+    );
+    return lines.join("\n");
+  }
+
+  private buildNormalizedDifferenceSnippet(args: JsonObject): string {
+    const assetId = stringArg(args, "asset_id");
+    const indexName = stringArg(args, "index_name", "NDVI") || "ND";
+    const positiveBand = stringArg(args, "positive_band");
+    const negativeBand = stringArg(args, "negative_band");
+    const visParams = buildGeeVisParams({
+      bands: indexName,
+      min_value: args.min_value ?? -1,
+      max_value: args.max_value ?? 1,
+      palette: args.palette,
+    });
+    return [
+      `const assetId = ${JSON.stringify(assetId)};`,
+      `const source = ee.Image(assetId);`,
+      `const image = source.normalizedDifference([${JSON.stringify(positiveBand)}, ${JSON.stringify(negativeBand)}]).rename(${JSON.stringify(indexName)});`,
+      `Map.addLayer(image, ${JSON.stringify(visParams)}, ${JSON.stringify(stringArg(args, "layer_name", `${assetId.split("/").at(-1) ?? assetId} ${indexName}`))});`,
+    ].join("\n");
+  }
+
   private async restoreOverlaysAfterStyleChange(): Promise<void> {
     const saved = Array.from(this.overlays.values()).map((overlay) => ({
       ...overlay,
@@ -2130,6 +2783,18 @@ export class MapLibreAgentTools {
             name: overlay.name,
             url: overlay.url,
             attribution: overlay.attribution,
+          });
+        } else if (overlay.kind === "basemap" && overlay.url) {
+          await this.addBasemapOverlay({
+            name: overlay.name,
+            url: overlay.url,
+            attribution: overlay.attribution,
+            opacity: Number(overlay.style?.opacity ?? 1),
+          });
+        } else if (overlay.kind === "gee" && overlay.url) {
+          await this.addGeeRasterOverlay({
+            name: overlay.name,
+            url: overlay.url,
           });
         } else if (overlay.kind === "marker" && overlay.marker) {
           overlay.marker.addTo(this.map);
