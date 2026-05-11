@@ -1,4 +1,5 @@
 import type { Map, StyleSpecification } from 'maplibre-gl';
+import type { EarthEngineOptions } from './earth-engine';
 
 export type GeoAgentProviderId =
   | 'openai-responses'
@@ -98,6 +99,12 @@ export interface GeoAgentControlOptions {
    * Known basemap style IDs available to the agent.
    */
   basemaps?: Record<string, string | StyleSpecification>;
+
+  /**
+   * Optional Google Earth Engine tool configuration. Browser OAuth is used;
+   * do not provide service account private keys to this browser package.
+   */
+  earthEngine?: EarthEngineOptions;
 }
 
 export interface GeoAgentState {

@@ -37,6 +37,8 @@ jobs:
         run: npm run build
 
       - name: Build examples for deployment
+        env:
+          VITE_GEE_OAUTH_CLIENT_ID: ${{ vars.VITE_GEE_OAUTH_CLIENT_ID || secrets.VITE_GEE_OAUTH_CLIENT_ID }}
         run: npm run build:examples
 
       - name: Setup Pages

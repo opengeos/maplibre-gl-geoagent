@@ -68,6 +68,9 @@ const BROWSER_MAPLIBRE_SYSTEM_PROMPT = `You are an AI assistant embedded in a br
 
 Workflow guidance:
 - Use browser map tools for map navigation, layer inspection, marker creation, GeoJSON display, layer visibility, feature queries, and screenshots.
+- Use add_basemap for requests to add satellite imagery or another raster background, including Google satellite. Use change_basemap only when the user explicitly asks to replace the whole map style.
+- When the user asks for Google Earth Engine data, GEE catalog data, SRTM from GEE, Sentinel/Landsat/MODIS/GEE assets, NDVI, or Earth Engine statistics, use the dedicated Earth Engine tools first.
+- Do not silently replace a requested Earth Engine layer with unrelated public XYZ, terrain, or basemap tiles. If an Earth Engine tool fails, report the exact tool error and ask for the missing credential/project/asset detail.
 - Coordinates in user-facing prompts are latitude/longitude, but browser map internals use longitude/latitude. Use the tool parameter names exactly.
 - Do not ask the user to paste JavaScript or run Python for actions that the browser map tools can perform.
 - Keep responses concise and include layer names, locations, and tool results when useful.`;
@@ -84,6 +87,10 @@ interface GeoAgentUi {
   modelIdInput: HTMLInputElement;
   bedrockRegionLabel: HTMLLabelElement;
   bedrockRegionInput: HTMLInputElement;
+  earthEngineDetails: HTMLDetailsElement;
+  earthEngineClientIdInput: HTMLInputElement;
+  earthEngineProjectIdInput: HTMLInputElement;
+  earthEngineStatus: HTMLDivElement;
   permissionRow: HTMLDivElement;
   allowCodeInput: HTMLInputElement;
   allowDestructiveInput: HTMLInputElement;
@@ -91,6 +98,7 @@ interface GeoAgentUi {
   form: HTMLFormElement;
   prompt: HTMLTextAreaElement;
   sendButton: HTMLButtonElement;
+  cancelButton: HTMLButtonElement;
   clearButton: HTMLButtonElement;
   copyButton: HTMLButtonElement;
   resizeHandle: HTMLDivElement;
@@ -126,6 +134,10 @@ function storageRemove(key: string): void {
   }
 }
 
+function firstValue(...values: Array<string | undefined | null>): string {
+  return values.find((value) => value?.trim())?.trim() ?? '';
+}
+
 function defaultModelFor(
   providerId: GeoAgentProviderId,
   defaultModel: GeoAgentControlOptions['defaultModel'],
@@ -142,9 +154,9 @@ function markdownHeading(role: string): string {
 
 export class GeoAgentControl implements IControl {
   private readonly options: Required<
-    Omit<GeoAgentControlOptions, 'defaultModel' | 'basemaps'>
+    Omit<GeoAgentControlOptions, 'defaultModel' | 'basemaps' | 'earthEngine'>
   > &
-    Pick<GeoAgentControlOptions, 'defaultModel' | 'basemaps'>;
+    Pick<GeoAgentControlOptions, 'defaultModel' | 'basemaps' | 'earthEngine'>;
   private map?: MapLibreMap;
   private mapContainer?: HTMLElement;
   private container?: HTMLElement;
@@ -165,6 +177,8 @@ export class GeoAgentControl implements IControl {
   private clickOutsideHandler: ((e: MouseEvent) => void) | null = null;
   private panelResizeMoveHandler: ((e: MouseEvent) => void) | null = null;
   private panelResizeUpHandler: (() => void) | null = null;
+  private activeAbortController: AbortController | null = null;
+  private cancelRequested = false;
 
   constructor(options: GeoAgentControlOptions = {}) {
     this.options = {
@@ -182,6 +196,7 @@ export class GeoAgentControl implements IControl {
       showPermissionToggles: options.showPermissionToggles ?? false,
       defaultModel: options.defaultModel,
       basemaps: options.basemaps,
+      earthEngine: options.earthEngine,
     };
     const providerId = this.initialProviderId();
     this.state = {
@@ -207,6 +222,12 @@ export class GeoAgentControl implements IControl {
       basemaps: { ...DEFAULT_BASEMAPS, ...this.options.basemaps },
       allowCodeExecution: () => this.state.allowCodeExecution,
       allowDestructiveTools: () => this.state.allowDestructiveTools,
+      earthEngine: this.options.earthEngine,
+      onStateDataChange: (data) => {
+        this.state.data = { ...(this.state.data ?? {}), ...data };
+        this.updateEarthEngineStatus();
+        this.emit('statechange');
+      },
     });
     this.setupEventListeners();
     this.loadProviderSettings();
@@ -236,6 +257,10 @@ export class GeoAgentControl implements IControl {
       this.clickOutsideHandler = null;
     }
     this.stopPanelResize();
+    this.activeAbortController?.abort();
+    this.agent?.cancel();
+    this.activeAbortController = null;
+    this.cancelRequested = false;
 
     this.tools?.destroy();
     this.tools = undefined;
@@ -384,6 +409,10 @@ export class GeoAgentControl implements IControl {
     return `${this.options.storagePrefix}.bedrock.region`;
   }
 
+  private earthEngineProjectIdStorageKey(): string {
+    return `${this.options.storagePrefix}.earthEngine.projectId`;
+  }
+
   private initialBedrockRegion(): string {
     return (
       storageGet(this.bedrockRegionStorageKey()) ||
@@ -478,6 +507,18 @@ export class GeoAgentControl implements IControl {
         </label>
       </div>
 
+      <details class="geoagent-earth-engine">
+        <summary>Earth Engine</summary>
+        <input class="geoagent-ee-client-id" type="hidden" />
+        <div class="geoagent-earth-engine-grid">
+          <label>
+            Project ID
+            <input class="geoagent-ee-project-id" autocomplete="off" placeholder="Earth Engine project" />
+          </label>
+        </div>
+        <div class="geoagent-earth-engine-status"></div>
+      </details>
+
       <div class="geoagent-toggle-row" aria-label="Agent permissions">
         <label class="geoagent-checkbox-row">
           <input class="geoagent-allow-code" type="checkbox" />
@@ -498,6 +539,7 @@ export class GeoAgentControl implements IControl {
         </label>
         <div class="geoagent-actions">
           <button class="geoagent-send" type="submit" disabled>Send</button>
+          <button class="geoagent-cancel secondary" type="button" disabled>Cancel</button>
           <button class="geoagent-copy secondary" type="button">Copy Markdown</button>
           <button class="geoagent-clear secondary" type="button">Clear</button>
         </div>
@@ -520,6 +562,10 @@ export class GeoAgentControl implements IControl {
       modelIdInput: this.requiredElement(content, '.geoagent-model-id'),
       bedrockRegionLabel: this.requiredElement(content, '.geoagent-bedrock-region-row'),
       bedrockRegionInput: this.requiredElement(content, '.geoagent-bedrock-region'),
+      earthEngineDetails: this.requiredElement(content, '.geoagent-earth-engine'),
+      earthEngineClientIdInput: this.requiredElement(content, '.geoagent-ee-client-id'),
+      earthEngineProjectIdInput: this.requiredElement(content, '.geoagent-ee-project-id'),
+      earthEngineStatus: this.requiredElement(content, '.geoagent-earth-engine-status'),
       permissionRow: this.requiredElement(content, '.geoagent-toggle-row'),
       allowCodeInput: this.requiredElement(content, '.geoagent-allow-code'),
       allowDestructiveInput: this.requiredElement(content, '.geoagent-allow-destructive'),
@@ -527,12 +573,14 @@ export class GeoAgentControl implements IControl {
       form: this.requiredElement(content, '.geoagent-form'),
       prompt: this.requiredElement(content, '.geoagent-prompt'),
       sendButton: this.requiredElement(content, '.geoagent-send'),
+      cancelButton: this.requiredElement(content, '.geoagent-cancel'),
       clearButton: this.requiredElement(content, '.geoagent-clear'),
       copyButton: this.requiredElement(content, '.geoagent-copy'),
       resizeHandle,
       closeButton,
     };
     this.ui.permissionRow.hidden = !this.options.showPermissionToggles;
+    this.setupEarthEngineControls();
     this.populateProviderOptions();
     this.wireUiEvents();
     this.syncUiFromState();
@@ -558,6 +606,74 @@ export class GeoAgentControl implements IControl {
       option.textContent = provider.label;
       this.ui.providerSelect.appendChild(option);
     }
+  }
+
+  private setupEarthEngineControls(): void {
+    if (!this.ui) {
+      return;
+    }
+    const enabled =
+      !!this.options.earthEngine && this.options.earthEngine.enabled !== false;
+    this.ui.earthEngineDetails.hidden = !enabled;
+    if (!enabled) {
+      return;
+    }
+    const oauthClientId = firstValue(
+      this.options.earthEngine?.oauthClientId,
+    );
+    const projectId = firstValue(
+      storageGet(this.earthEngineProjectIdStorageKey()),
+      this.options.earthEngine?.projectId,
+    );
+    this.ui.earthEngineClientIdInput.value = oauthClientId;
+    this.ui.earthEngineProjectIdInput.value = projectId;
+    this.ui.earthEngineDetails.open = !oauthClientId || !projectId;
+    this.applyEarthEngineSettings();
+  }
+
+  private applyEarthEngineSettings(): void {
+    if (!this.ui || !this.options.earthEngine) {
+      return;
+    }
+    const oauthClientId = this.ui.earthEngineClientIdInput.value.trim();
+    const projectId = this.ui.earthEngineProjectIdInput.value.trim();
+    if (projectId) {
+      storageSet(this.earthEngineProjectIdStorageKey(), projectId);
+    } else {
+      storageRemove(this.earthEngineProjectIdStorageKey());
+    }
+    this.options.earthEngine = {
+      ...this.options.earthEngine,
+      oauthClientId,
+      projectId,
+    };
+    this.tools?.updateEarthEngineOptions(this.options.earthEngine);
+    this.updateEarthEngineStatus();
+    this.emit('statechange');
+  }
+
+  private updateEarthEngineStatus(): void {
+    if (!this.ui || this.ui.earthEngineDetails.hidden) {
+      return;
+    }
+    const oauthClientId = this.ui.earthEngineClientIdInput.value.trim();
+    const projectId = this.ui.earthEngineProjectIdInput.value.trim();
+    const earthEngine = this.state.data?.earthEngine as
+      | { initialized?: boolean; layerCount?: number }
+      | undefined;
+    if (!oauthClientId) {
+      this.ui.earthEngineStatus.textContent =
+        'OAuth Client ID is not configured by this app. Set VITE_GEE_OAUTH_CLIENT_ID before running Earth Engine tools.';
+      return;
+    }
+    if (!projectId) {
+      this.ui.earthEngineStatus.textContent =
+        'Enter an Earth Engine project ID before running Earth Engine tools.';
+      return;
+    }
+    this.ui.earthEngineStatus.textContent = earthEngine
+      ? `Initialized: ${earthEngine.initialized ? 'yes' : 'no'}; layers: ${earthEngine.layerCount ?? 0}.`
+      : 'Earth Engine tools configured.';
   }
 
   private wireUiEvents(): void {
@@ -614,6 +730,9 @@ export class GeoAgentControl implements IControl {
       this.updateControls();
       this.emit('statechange');
     });
+    ui.earthEngineProjectIdInput.addEventListener('input', () => {
+      this.applyEarthEngineSettings();
+    });
     ui.allowCodeInput.addEventListener('change', () => {
       this.state.allowCodeExecution = ui.allowCodeInput.checked;
       this.invalidateAgent();
@@ -665,6 +784,7 @@ export class GeoAgentControl implements IControl {
     ui.copyButton.addEventListener('click', () => {
       void this.copyConversationAsMarkdown();
     });
+    ui.cancelButton.addEventListener('click', () => this.cancelActiveRun());
   }
 
   private setupEventListeners(): void {
@@ -850,6 +970,7 @@ export class GeoAgentControl implements IControl {
     this.ui.bedrockRegionInput.value = this.state.bedrockRegion;
     this.ui.bedrockRegionInput.placeholder = provider.defaultRegion || 'us-west-2';
     this.ui.bedrockRegionLabel.hidden = provider.id !== 'bedrock';
+    this.updateEarthEngineStatus();
   }
 
   private setStatus(text: string, kind = ''): void {
@@ -958,6 +1079,7 @@ export class GeoAgentControl implements IControl {
       !this.ui.apiKeyInput.value.trim() ||
       !this.ui.modelIdInput.value.trim() ||
       (this.state.providerId === 'bedrock' && !this.ui.bedrockRegionInput.value.trim());
+    this.ui.cancelButton.disabled = !this.state.busy || this.cancelRequested;
     this.ui.clearButton.disabled = this.state.busy;
     this.ui.copyButton.disabled = this.ui.log.childElementCount === 0;
   }
@@ -965,6 +1087,18 @@ export class GeoAgentControl implements IControl {
   private invalidateAgent(): void {
     this.agent = null;
     this.agentSignature = '';
+  }
+
+  private cancelActiveRun(): void {
+    if (!this.state.busy || this.cancelRequested) {
+      return;
+    }
+    this.cancelRequested = true;
+    this.activeAbortController?.abort();
+    this.agent?.cancel();
+    this.setStatus('Cancelling', 'connected');
+    this.appendLog('system', 'Cancellation requested.');
+    this.updateControls();
   }
 
   private async createProviderModel(
@@ -1113,16 +1247,23 @@ export class GeoAgentControl implements IControl {
     this.streamingAssistantText = '';
     this.ui.prompt.value = '';
     this.state.busy = true;
+    this.cancelRequested = false;
+    const abortController = new AbortController();
+    this.activeAbortController = abortController;
     this.setStatus('Running', 'connected');
     this.updateControls();
     this.emit('statechange');
     try {
       const activeAgent = await this.getAgent();
       let finalAnswer = '';
-      for await (const event of activeAgent.stream(text)) {
+      for await (const event of activeAgent.stream(text, {
+        cancelSignal: abortController.signal,
+      })) {
         finalAnswer = this.handleAgentStreamEvent(event) ?? finalAnswer;
       }
-      const answer = finalAnswer || this.streamingAssistantText || 'Done.';
+      const answer = abortController.signal.aborted
+        ? 'Cancelled.'
+        : finalAnswer || this.streamingAssistantText || 'Done.';
       const assistantEl = this.getStreamingAssistantElement();
       if (assistantEl) {
         assistantEl.closest<HTMLElement>('.geoagent-entry')!.dataset.markdown = answer;
@@ -1130,13 +1271,22 @@ export class GeoAgentControl implements IControl {
       } else {
         this.appendAssistantLog(answer);
       }
-      this.setStatus('Ready', 'connected');
+      this.setStatus(abortController.signal.aborted ? 'Cancelled' : 'Ready', 'connected');
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      this.appendLog('error', message);
-      this.setStatus('Error', 'error');
+      if (abortController.signal.aborted) {
+        this.appendAssistantLog('Cancelled.');
+        this.setStatus('Cancelled', 'connected');
+      } else {
+        this.appendLog('error', message);
+        this.setStatus('Error', 'error');
+      }
     } finally {
       this.state.busy = false;
+      if (this.activeAbortController === abortController) {
+        this.activeAbortController = null;
+      }
+      this.cancelRequested = false;
       this.streamingAssistantTextEl = null;
       this.streamingAssistantText = '';
       this.updateControls();
