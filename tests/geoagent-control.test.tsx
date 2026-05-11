@@ -270,6 +270,58 @@ describe("GeoAgentControl", () => {
     map.cleanup();
   });
 
+  it("uses host-provided initial API keys when no session key is stored", () => {
+    const storagePrefix = "geoagent.initial.keys";
+    sessionStorage.removeItem(`${storagePrefix}.anthropic.api_key`);
+    const map = new MockMap();
+    const control = new GeoAgentControl({
+      storagePrefix,
+      defaultProvider: "anthropic",
+      apiKeys: {
+        anthropic: "env-anthropic-key",
+      },
+    });
+    const container = control.onAdd(map as never);
+    map.controlStack.appendChild(container);
+    const apiKeyInput = map.mapContainer.querySelector<HTMLInputElement>(
+      ".geoagent-api-key",
+    );
+
+    expect(apiKeyInput?.value).toBe("env-anthropic-key");
+    expect(sessionStorage.getItem(`${storagePrefix}.anthropic.api_key`)).toBe(
+      null,
+    );
+
+    control.onRemove();
+    map.cleanup();
+  });
+
+  it("prefers a stored API key over a host-provided initial API key", () => {
+    const storagePrefix = "geoagent.stored.keys";
+    sessionStorage.setItem(
+      `${storagePrefix}.google.api_key`,
+      "stored-google-key",
+    );
+    const map = new MockMap();
+    const control = new GeoAgentControl({
+      storagePrefix,
+      defaultProvider: "google",
+      apiKeys: {
+        google: "env-google-key",
+      },
+    });
+    const container = control.onAdd(map as never);
+    map.controlStack.appendChild(container);
+    const apiKeyInput = map.mapContainer.querySelector<HTMLInputElement>(
+      ".geoagent-api-key",
+    );
+
+    expect(apiKeyInput?.value).toBe("stored-google-key");
+
+    control.onRemove();
+    map.cleanup();
+  });
+
   it("shows Earth Engine settings in the main panel when enabled", () => {
     const storagePrefix = "geoagent.ee.panel";
     sessionStorage.removeItem(`${storagePrefix}.earthEngine.projectId`);

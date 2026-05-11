@@ -154,9 +154,15 @@ function markdownHeading(role: string): string {
 
 export class GeoAgentControl implements IControl {
   private readonly options: Required<
-    Omit<GeoAgentControlOptions, 'defaultModel' | 'basemaps' | 'earthEngine'>
+    Omit<
+      GeoAgentControlOptions,
+      'defaultModel' | 'basemaps' | 'earthEngine' | 'apiKeys'
+    >
   > &
-    Pick<GeoAgentControlOptions, 'defaultModel' | 'basemaps' | 'earthEngine'>;
+    Pick<
+      GeoAgentControlOptions,
+      'defaultModel' | 'basemaps' | 'earthEngine' | 'apiKeys'
+    >;
   private map?: MapLibreMap;
   private mapContainer?: HTMLElement;
   private container?: HTMLElement;
@@ -195,6 +201,7 @@ export class GeoAgentControl implements IControl {
       allowDestructiveToolsDefault: options.allowDestructiveToolsDefault ?? true,
       showPermissionToggles: options.showPermissionToggles ?? false,
       defaultModel: options.defaultModel,
+      apiKeys: options.apiKeys,
       basemaps: options.basemaps,
       earthEngine: options.earthEngine,
     };
@@ -959,13 +966,14 @@ export class GeoAgentControl implements IControl {
       return;
     }
     const provider = this.currentProviderConfig();
+    const initialApiKey = this.options.apiKeys?.[provider.id]?.trim() ?? '';
     this.state.providerId = provider.id;
     this.state.modelId =
       storageGet(this.modelStorageKey(provider.id)) || provider.defaultModel;
     this.ui.providerSelect.value = provider.id;
     this.ui.apiKeyLabel.textContent = provider.keyLabel;
     this.ui.apiKeyInput.placeholder = provider.keyPlaceholder;
-    this.ui.apiKeyInput.value = storageGet(provider.storageKey) || '';
+    this.ui.apiKeyInput.value = storageGet(provider.storageKey) || initialApiKey;
     this.ui.modelIdInput.value = this.state.modelId;
     this.ui.modelIdInput.placeholder = provider.defaultModel;
     this.state.bedrockRegion = this.initialBedrockRegion();

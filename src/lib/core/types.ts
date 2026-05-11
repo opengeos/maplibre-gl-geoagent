@@ -78,6 +78,13 @@ export interface GeoAgentControlOptions {
   storagePrefix?: string;
 
   /**
+   * Initial API keys supplied by the host application. Saved sessionStorage
+   * values take precedence, and these values are not written to storage unless
+   * the user edits the API key field.
+   */
+  apiKeys?: Partial<Record<GeoAgentProviderId, string>>;
+
+  /**
    * Whether the optional MapLibre JavaScript execution tool starts enabled.
    * @default true
    */
