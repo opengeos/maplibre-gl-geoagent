@@ -26,7 +26,10 @@ function App() {
 
     mapInstance.addControl(new maplibregl.NavigationControl(), 'top-right');
     mapInstance.addControl(new maplibregl.FullscreenControl(), 'top-right');
+    mapInstance.addControl(new maplibregl.GlobeControl(), 'top-right');
     mapInstance.on('load', () => {
+      mapInstance.setProjection({ type: 'globe' });
+
       mapInstance.addControl(
         new LayerControl({
           collapsed: true,

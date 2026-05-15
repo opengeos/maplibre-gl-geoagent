@@ -33,8 +33,11 @@ const map = new maplibregl.Map({
 
 map.addControl(new maplibregl.NavigationControl(), 'top-right');
 map.addControl(new maplibregl.FullscreenControl(), 'top-right');
+map.addControl(new maplibregl.GlobeControl(), 'top-right');
 
 map.on('load', () => {
+  map.setProjection({ type: 'globe' });
+
   map.addControl(
     new LayerControl({
       collapsed: true,
