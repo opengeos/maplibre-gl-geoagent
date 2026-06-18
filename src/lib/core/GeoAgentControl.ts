@@ -101,9 +101,12 @@ interface GeoAgentUi {
   cancelButton: HTMLButtonElement;
   clearButton: HTMLButtonElement;
   copyButton: HTMLButtonElement;
-  resizeHandle: HTMLDivElement;
+  resizeHandleLeft: HTMLDivElement;
+  resizeHandleRight: HTMLDivElement;
   closeButton: HTMLButtonElement;
 }
+
+type PanelResizeCorner = 'bottom-left' | 'bottom-right';
 
 type EventHandlersMap = globalThis.Map<
   GeoAgentControlEvent,
@@ -156,12 +159,12 @@ export class GeoAgentControl implements IControl {
   private readonly options: Required<
     Omit<
       GeoAgentControlOptions,
-      'defaultModel' | 'basemaps' | 'earthEngine' | 'apiKeys'
+      'defaultModel' | 'basemaps' | 'earthEngine' | 'apiKeys' | 'panelHeight'
     >
   > &
     Pick<
       GeoAgentControlOptions,
-      'defaultModel' | 'basemaps' | 'earthEngine' | 'apiKeys'
+      'defaultModel' | 'basemaps' | 'earthEngine' | 'apiKeys' | 'panelHeight'
     >;
   private map?: MapLibreMap;
   private mapContainer?: HTMLElement;
@@ -180,7 +183,6 @@ export class GeoAgentControl implements IControl {
   private eventHandlers: EventHandlersMap = new globalThis.Map();
   private resizeHandler: (() => void) | null = null;
   private mapResizeHandler: (() => void) | null = null;
-  private clickOutsideHandler: ((e: MouseEvent) => void) | null = null;
   private panelResizeMoveHandler: ((e: MouseEvent) => void) | null = null;
   private panelResizeUpHandler: (() => void) | null = null;
   private activeAbortController: AbortController | null = null;
@@ -194,6 +196,9 @@ export class GeoAgentControl implements IControl {
       panelWidth: options.panelWidth ?? 390,
       panelMinWidth: options.panelMinWidth ?? 320,
       panelMaxWidth: options.panelMaxWidth ?? 720,
+      panelHeight: options.panelHeight,
+      panelMinHeight: options.panelMinHeight ?? 320,
+      panelMaxHeight: options.panelMaxHeight ?? 2000,
       className: options.className ?? '',
       defaultProvider: options.defaultProvider ?? DEFAULT_PROVIDER,
       storagePrefix: options.storagePrefix ?? DEFAULT_STORAGE_PREFIX,
@@ -209,6 +214,10 @@ export class GeoAgentControl implements IControl {
     this.state = {
       collapsed: this.options.collapsed,
       panelWidth: this.constrainPanelWidth(this.options.panelWidth),
+      panelHeight:
+        this.options.panelHeight !== undefined
+          ? this.constrainPanelHeight(this.options.panelHeight)
+          : undefined,
       busy: false,
       providerId,
       modelId: this.initialModelId(providerId),
@@ -259,10 +268,6 @@ export class GeoAgentControl implements IControl {
       this.map.off('resize', this.mapResizeHandler);
       this.mapResizeHandler = null;
     }
-    if (this.clickOutsideHandler) {
-      document.removeEventListener('click', this.clickOutsideHandler);
-      this.clickOutsideHandler = null;
-    }
     this.stopPanelResize();
     this.activeAbortController?.abort();
     this.agent?.cancel();
@@ -308,6 +313,11 @@ export class GeoAgentControl implements IControl {
       const panelWidth = this.constrainPanelWidth(newState.panelWidth);
       this.state.panelWidth = panelWidth;
       this.panel.style.width = `${panelWidth}px`;
+    }
+    if (newState.panelHeight !== undefined && this.panel) {
+      const panelHeight = this.constrainPanelHeight(newState.panelHeight);
+      this.state.panelHeight = panelHeight;
+      this.panel.style.height = `${panelHeight}px`;
     }
     if (collapsedChanged) {
       if (this.state.collapsed) {
@@ -462,6 +472,9 @@ export class GeoAgentControl implements IControl {
     const panel = document.createElement('div');
     panel.className = 'geoagent-panel';
     panel.style.width = `${this.state.panelWidth}px`;
+    if (this.state.panelHeight !== undefined) {
+      panel.style.height = `${this.state.panelHeight}px`;
+    }
 
     const header = document.createElement('div');
     header.className = 'geoagent-panel-header';
@@ -554,14 +567,10 @@ export class GeoAgentControl implements IControl {
       </form>
     `;
 
-    const resizeHandle = document.createElement('div');
-    resizeHandle.className = 'geoagent-panel-resize-handle';
-    resizeHandle.setAttribute('role', 'separator');
-    resizeHandle.setAttribute('aria-orientation', 'vertical');
-    resizeHandle.setAttribute('aria-label', 'Resize GeoAgent panel');
-    resizeHandle.addEventListener('mousedown', (event) => this.startPanelResize(event));
+    const resizeHandleLeft = this.createResizeHandle('bottom-left');
+    const resizeHandleRight = this.createResizeHandle('bottom-right');
 
-    panel.append(header, content, resizeHandle);
+    panel.append(header, content, resizeHandleLeft, resizeHandleRight);
     this.ui = {
       status,
       providerSelect: this.requiredElement(content, '.geoagent-provider'),
@@ -584,7 +593,8 @@ export class GeoAgentControl implements IControl {
       cancelButton: this.requiredElement(content, '.geoagent-cancel'),
       clearButton: this.requiredElement(content, '.geoagent-clear'),
       copyButton: this.requiredElement(content, '.geoagent-copy'),
-      resizeHandle,
+      resizeHandleLeft,
+      resizeHandleRight,
       closeButton,
     };
     this.ui.permissionRow.hidden = !this.options.showPermissionToggles;
@@ -798,19 +808,8 @@ export class GeoAgentControl implements IControl {
   }
 
   private setupEventListeners(): void {
-    this.clickOutsideHandler = (event: MouseEvent) => {
-      const target = event.target as Node;
-      if (
-        this.container &&
-        this.panel &&
-        !this.container.contains(target) &&
-        !this.panel.contains(target)
-      ) {
-        this.collapse();
-      }
-    };
-    document.addEventListener('click', this.clickOutsideHandler);
-
+    // The panel stays open until the user explicitly closes it with the header
+    // close button; clicking elsewhere on the page must not collapse it.
     this.resizeHandler = () => {
       if (!this.state.collapsed) {
         this.updatePanelPosition();
@@ -895,27 +894,91 @@ export class GeoAgentControl implements IControl {
     );
   }
 
-  private startPanelResize(event: MouseEvent): void {
-    if (!this.panel) {
+  private constrainPanelHeight(height: number): number {
+    // The map container is the practical ceiling, so the panel can be dragged
+    // to nearly fill it (not just the option default).
+    let max = this.options.panelMaxHeight;
+    const mapHeight = this.mapContainer?.clientHeight ?? 0;
+    if (mapHeight > 0) {
+      max = Math.min(max, mapHeight - 20);
+    }
+    return Math.max(
+      this.options.panelMinHeight,
+      Math.min(max, Math.round(height)),
+    );
+  }
+
+  private createResizeHandle(corner: PanelResizeCorner): HTMLDivElement {
+    const handle = document.createElement('div');
+    const side = corner === 'bottom-left' ? 'bl' : 'br';
+    handle.className = `geoagent-panel-resize-handle geoagent-panel-resize-handle-${side}`;
+    handle.setAttribute('role', 'separator');
+    handle.setAttribute('aria-label', 'Resize GeoAgent panel');
+    handle.addEventListener('mousedown', (event) => this.startPanelResize(event, corner));
+    return handle;
+  }
+
+  private startPanelResize(event: MouseEvent, corner: PanelResizeCorner): void {
+    if (!this.panel || !this.mapContainer) {
       return;
     }
     event.preventDefault();
     event.stopPropagation();
 
-    const position = this.getControlPosition();
-    const resizeDirection =
-      position === 'top-left' || position === 'bottom-left' ? 1 : -1;
-    const startX = event.clientX;
-    const startWidth = this.panel.getBoundingClientRect().width || this.state.panelWidth;
-
     this.stopPanelResize();
+
+    // The dragged corner moves the bottom edge plus one side edge; the opposite
+    // (top + other side) corner must stay put. Re-anchor the panel to that fixed
+    // corner so that changing width/height moves only the dragged edges via CSS,
+    // which keeps the fixed corner stationary even when the size is clamped.
+    const panelRect = this.panel.getBoundingClientRect();
+    const mapRect = this.mapContainer.getBoundingClientRect();
+
+    this.panel.style.top = `${panelRect.top - mapRect.top}px`;
+    this.panel.style.bottom = '';
+    if (corner === 'bottom-left') {
+      this.panel.style.right = `${mapRect.right - panelRect.right}px`;
+      this.panel.style.left = '';
+    } else {
+      this.panel.style.left = `${panelRect.left - mapRect.left}px`;
+      this.panel.style.right = '';
+    }
+
+    const startX = event.clientX;
+    const startY = event.clientY;
+    const startWidth = panelRect.width || this.state.panelWidth;
+    const startHeight =
+      panelRect.height || this.state.panelHeight || this.options.panelMinHeight;
+    // Dragging the left corner left, or the right corner right, grows the width.
+    const widthDirection = corner === 'bottom-left' ? -1 : 1;
+
+    // The dragged edges may not extend past the map container. (Skipped when the
+    // map has no layout, e.g. in jsdom, where rects are all zero.)
+    const gap = 8;
+    const hasLayout = mapRect.width > 0 && mapRect.height > 0;
+    const maxWidth = !hasLayout
+      ? Number.POSITIVE_INFINITY
+      : corner === 'bottom-left'
+        ? panelRect.right - mapRect.left - gap
+        : mapRect.right - panelRect.left - gap;
+    const maxHeight = !hasLayout
+      ? Number.POSITIVE_INFINITY
+      : mapRect.bottom - panelRect.top - gap;
+
     this.panel.classList.add('resizing');
     document.body.classList.add('geoagent-panel-resizing');
 
     this.panelResizeMoveHandler = (moveEvent: MouseEvent) => {
       moveEvent.preventDefault();
-      const nextWidth = startWidth + (moveEvent.clientX - startX) * resizeDirection;
-      this.setState({ panelWidth: nextWidth });
+      const width = Math.min(
+        maxWidth,
+        startWidth + (moveEvent.clientX - startX) * widthDirection,
+      );
+      const height = Math.min(
+        maxHeight,
+        startHeight + (moveEvent.clientY - startY),
+      );
+      this.setState({ panelWidth: width, panelHeight: height });
     };
     this.panelResizeUpHandler = () => this.stopPanelResize();
 
@@ -1326,7 +1389,6 @@ export class GeoAgentControl implements IControl {
     const buttonRect = button.getBoundingClientRect();
     const mapRect = this.mapContainer.getBoundingClientRect();
     const position = this.getControlPosition();
-    const resizeOnLeft = position === 'top-right' || position === 'bottom-right';
     const buttonTop = buttonRect.top - mapRect.top;
     const buttonBottom = mapRect.bottom - buttonRect.bottom;
     const buttonLeft = buttonRect.left - mapRect.left;
@@ -1337,8 +1399,6 @@ export class GeoAgentControl implements IControl {
     this.panel.style.bottom = '';
     this.panel.style.left = '';
     this.panel.style.right = '';
-    this.panel.classList.toggle('resize-left', resizeOnLeft);
-    this.panel.classList.toggle('resize-right', !resizeOnLeft);
 
     switch (position) {
       case 'top-left':
