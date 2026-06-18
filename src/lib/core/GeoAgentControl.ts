@@ -480,11 +480,12 @@ export class GeoAgentControl implements IControl {
     const closeButton = document.createElement('button');
     closeButton.className = 'geoagent-icon-button';
     closeButton.type = 'button';
-    closeButton.title = 'Collapse panel';
-    closeButton.setAttribute('aria-label', 'Collapse panel');
+    closeButton.title = 'Close';
+    closeButton.setAttribute('aria-label', 'Close');
     closeButton.innerHTML = `
       <svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-        <path d="m18 15-6-6-6 6"></path>
+        <path d="M18 6 6 18"></path>
+        <path d="m6 6 12 12"></path>
       </svg>
     `;
     closeButton.addEventListener('click', () => this.collapse());
@@ -947,7 +948,6 @@ export class GeoAgentControl implements IControl {
     this.ui.bedrockRegionLabel.hidden = this.state.providerId !== 'bedrock';
     this.ui.allowCodeInput.checked = this.state.allowCodeExecution;
     this.ui.allowDestructiveInput.checked = this.state.allowDestructiveTools;
-    this.ui.closeButton.setAttribute('aria-expanded', String(!this.state.collapsed));
   }
 
   private currentProviderId(): GeoAgentProviderId {
