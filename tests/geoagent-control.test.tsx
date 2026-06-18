@@ -567,35 +567,44 @@ describe("GeoAgentControl", () => {
     map.cleanup();
   });
 
-  it("resizes the panel with the drag handle and clamps width", () => {
+  it("resizes width and height with the bottom-right corner handle and clamps", () => {
     const map = new MockMap();
     const control = new GeoAgentControl({
       panelWidth: 430,
       panelMinWidth: 360,
       panelMaxWidth: 500,
+      panelHeight: 400,
+      panelMinHeight: 300,
+      panelMaxHeight: 600,
     });
     const container = control.onAdd(map as never);
     map.controlStack.appendChild(container);
     const handle = map.mapContainer.querySelector<HTMLElement>(
-      ".geoagent-panel-resize-handle",
+      ".geoagent-panel-resize-handle-br",
     );
 
     handle?.dispatchEvent(
-      new MouseEvent("mousedown", { bubbles: true, clientX: 100 }),
+      new MouseEvent("mousedown", { bubbles: true, clientX: 100, clientY: 100 }),
     );
     document.dispatchEvent(
-      new MouseEvent("mousemove", { bubbles: true, clientX: 200 }),
+      new MouseEvent("mousemove", { bubbles: true, clientX: 200, clientY: 300 }),
     );
 
+    // Dragging the bottom-right corner right and down grows both dimensions,
+    // clamped to the maximum width and within the height bounds.
     expect(control.getState().panelWidth).toBe(500);
     expect(control.getPanel()?.style.width).toBe("500px");
+    expect(control.getState().panelHeight).toBe(600);
+    expect(control.getPanel()?.style.height).toBe("600px");
 
     document.dispatchEvent(
-      new MouseEvent("mousemove", { bubbles: true, clientX: -200 }),
+      new MouseEvent("mousemove", { bubbles: true, clientX: -200, clientY: -200 }),
     );
 
     expect(control.getState().panelWidth).toBe(360);
     expect(control.getPanel()?.style.width).toBe("360px");
+    expect(control.getState().panelHeight).toBe(300);
+    expect(control.getPanel()?.style.height).toBe("300px");
 
     document.dispatchEvent(new MouseEvent("mouseup", { bubbles: true }));
     expect(document.body.classList.contains("geoagent-panel-resizing")).toBe(
@@ -606,7 +615,36 @@ describe("GeoAgentControl", () => {
     map.cleanup();
   });
 
-  it("expands, collapses, emits events, and closes on outside click", () => {
+  it("grows width to the left when dragging the bottom-left corner handle", () => {
+    const map = new MockMap();
+    const control = new GeoAgentControl({
+      panelWidth: 400,
+      panelMinWidth: 320,
+      panelMaxWidth: 520,
+    });
+    const container = control.onAdd(map as never);
+    map.controlStack.appendChild(container);
+    const handle = map.mapContainer.querySelector<HTMLElement>(
+      ".geoagent-panel-resize-handle-bl",
+    );
+
+    handle?.dispatchEvent(
+      new MouseEvent("mousedown", { bubbles: true, clientX: 200, clientY: 100 }),
+    );
+    // Dragging the bottom-left corner left (decreasing clientX) widens the panel.
+    document.dispatchEvent(
+      new MouseEvent("mousemove", { bubbles: true, clientX: 120, clientY: 100 }),
+    );
+
+    expect(control.getState().panelWidth).toBe(480);
+    expect(control.getPanel()?.style.width).toBe("480px");
+
+    document.dispatchEvent(new MouseEvent("mouseup", { bubbles: true }));
+    control.onRemove();
+    map.cleanup();
+  });
+
+  it("stays open on outside click and closes only via the close button", () => {
     const map = new MockMap();
     const control = new GeoAgentControl();
     const container = control.onAdd(map as never);
@@ -619,7 +657,16 @@ describe("GeoAgentControl", () => {
     expect(control.getState().collapsed).toBe(false);
     expect(control.getPanel()?.classList.contains("expanded")).toBe(true);
 
+    // Clicking outside the panel must NOT collapse it.
     document.body.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    expect(control.getState().collapsed).toBe(false);
+    expect(control.getPanel()?.classList.contains("expanded")).toBe(true);
+
+    // The header close button collapses the panel.
+    const closeButton = map.mapContainer.querySelector<HTMLButtonElement>(
+      ".geoagent-panel-header .geoagent-icon-button",
+    );
+    closeButton?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
     expect(control.getState().collapsed).toBe(true);
     expect(control.getPanel()?.classList.contains("expanded")).toBe(false);
     expect(events).toEqual(["expand", "collapse"]);

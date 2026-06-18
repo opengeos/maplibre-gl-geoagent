@@ -46,7 +46,7 @@
   z-index: 1000;
   display: none;
   max-width: calc(100% - 20px);
-  max-height: min(720px, calc(100% - 20px));
+  max-height: calc(100% - 20px);
   padding: 14px;
   border: 1px solid #d7dde5;
   border-radius: 8px;
@@ -69,35 +69,45 @@
 
 .geoagent-panel-resize-handle {
   position: absolute;
-  top: 44px;
-  bottom: 8px;
-  z-index: 2;
-  width: 10px;
-  cursor: ew-resize;
+  bottom: -3px;
+  z-index: 3;
+  width: 18px;
+  height: 18px;
   touch-action: none;
 }
 
-.geoagent-panel.resize-left .geoagent-panel-resize-handle {
-  left: -5px;
+.geoagent-panel-resize-handle-bl {
+  left: -3px;
+  cursor: nesw-resize;
 }
 
-.geoagent-panel.resize-right .geoagent-panel-resize-handle,
-.geoagent-panel:not(.resize-left) .geoagent-panel-resize-handle {
-  right: -5px;
+.geoagent-panel-resize-handle-br {
+  right: -3px;
+  cursor: nwse-resize;
 }
 
 .geoagent-panel-resize-handle::before {
   position: absolute;
-  top: 50%;
-  left: 50%;
-  width: 3px;
-  height: 36px;
-  border-radius: 999px;
-  background: #c7d2df;
+  bottom: 4px;
+  width: 9px;
+  height: 9px;
+  border-color: #c7d2df;
+  border-style: solid;
   content: "";
   opacity: 0;
-  transform: translate(-50%, -50%);
   transition: opacity 0.15s ease;
+}
+
+.geoagent-panel-resize-handle-bl::before {
+  left: 4px;
+  border-width: 0 0 2px 2px;
+  border-bottom-left-radius: 3px;
+}
+
+.geoagent-panel-resize-handle-br::before {
+  right: 4px;
+  border-width: 0 2px 2px 0;
+  border-bottom-right-radius: 3px;
 }
 
 .geoagent-panel-resize-handle:hover::before,
@@ -184,10 +194,24 @@ body.geoagent-panel-resizing {
 }
 
 .geoagent-panel-content {
-  display: grid;
+  display: flex;
+  flex-direction: column;
   gap: 12px;
   min-height: 0;
-  overflow: hidden;
+  /* The log flexes to absorb spare/short space; if the panel is still too short
+     for the fixed sections, the whole content scrolls so nothing is clipped. */
+  overflow-x: hidden;
+  overflow-y: auto;
+}
+
+/* Settings, Earth Engine, toggles and the prompt form keep their natural size;
+   only the conversation log flexes to fill (and scrolls) so the form and its
+   action buttons stay visible instead of being pushed past the panel. */
+.geoagent-settings-grid,
+.geoagent-earth-engine,
+.geoagent-toggle-row,
+.geoagent-form {
+  flex: 0 0 auto;
 }
 
 .geoagent-panel label {
@@ -325,8 +349,8 @@ body.geoagent-panel-resizing {
 }
 
 .geoagent-log {
-  min-height: 160px;
-  max-height: min(280px, calc(100vh - 360px));
+  flex: 1 1 160px;
+  min-height: 0;
   overflow: auto;
   padding: 10px;
   border: 1px solid #d7dde5;

@@ -56,6 +56,25 @@ export interface GeoAgentControlOptions {
   panelMaxWidth?: number;
 
   /**
+   * Height of the floating panel in pixels. When omitted the panel sizes to its
+   * content (capped by `panelMaxHeight`) until the user resizes it.
+   */
+  panelHeight?: number;
+
+  /**
+   * Minimum resizable panel height in pixels.
+   * @default 320
+   */
+  panelMinHeight?: number;
+
+  /**
+   * Maximum resizable panel height in pixels. The map container height is also
+   * enforced as a ceiling, so the panel can be dragged to nearly fill the map.
+   * @default 2000
+   */
+  panelMaxHeight?: number;
+
+  /**
    * Custom CSS class name for the control button container.
    */
   className?: string;
@@ -118,6 +137,8 @@ export interface GeoAgentControlOptions {
 export interface GeoAgentState {
   collapsed: boolean;
   panelWidth: number;
+  /** User-set panel height in pixels, or undefined when sized to content. */
+  panelHeight?: number;
   busy: boolean;
   providerId: GeoAgentProviderId;
   modelId: string;
