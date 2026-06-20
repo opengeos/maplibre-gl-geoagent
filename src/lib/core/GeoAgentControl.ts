@@ -1124,7 +1124,10 @@ export class GeoAgentControl implements IControl {
    * from updateControls() on every keystroke without clobbering them.
    */
   private applyIdleStatus(force = false): void {
-    if (!this.ui || this.state.busy) {
+    // A forced refresh (run finished, copy timeout, mount) must win even while
+    // `busy` is still set, otherwise the badge stays stuck on "Running" because
+    // the post-run call happens before the finally block clears `busy`.
+    if (!this.ui || (this.state.busy && !force)) {
       return;
     }
     if (!force && !IDLE_STATUS_LABELS.has(this.ui.status.textContent ?? '')) {
