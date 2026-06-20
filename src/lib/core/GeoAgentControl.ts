@@ -22,6 +22,15 @@ import type {
 const DEFAULT_PROVIDER: GeoAgentProviderId = 'openai-responses';
 const DEFAULT_STORAGE_PREFIX = 'geoagent.maplibre';
 
+// Status badge labels that represent an idle (not mid-run) state. The idle
+// status is recomputed from the current configuration, so it may flip between
+// these as the user fills in or clears credentials. Transient run statuses
+// (Running, Cancelled, Error, Copied) are intentionally excluded so they are
+// not clobbered by configuration changes.
+const STATUS_READY = 'Ready';
+const STATUS_SETUP = 'Setup required';
+const IDLE_STATUS_LABELS = new Set<string>([STATUS_READY, STATUS_SETUP]);
+
 const BASE_PROVIDER_CONFIGS: Record<
   GeoAgentProviderId,
   Omit<GeoAgentProviderConfig, 'storageKey'>
@@ -247,8 +256,8 @@ export class GeoAgentControl implements IControl {
     });
     this.setupEventListeners();
     this.loadProviderSettings();
-    this.setStatus('Ready', 'connected');
-    this.appendLog('system', 'Browser-only Strands MapLibre agent ready.');
+    this.applyIdleStatus(true);
+    this.appendLog('system', this.readyLogMessage());
     this.updateControls();
 
     if (!this.state.collapsed) {
@@ -1054,6 +1063,83 @@ export class GeoAgentControl implements IControl {
     this.ui.status.className = `geoagent-status ${kind}`.trim();
   }
 
+  /**
+   * Whether the agent has everything it needs to run a prompt for the current
+   * provider: an API key, a model id, and (for Bedrock) a region.
+   */
+  private isConfigured(): boolean {
+    if (!this.ui) {
+      return false;
+    }
+    if (!this.ui.apiKeyInput.value.trim() || !this.ui.modelIdInput.value.trim()) {
+      return false;
+    }
+    if (
+      this.state.providerId === 'bedrock' &&
+      !this.ui.bedrockRegionInput.value.trim()
+    ) {
+      return false;
+    }
+    return true;
+  }
+
+  /**
+   * Human-readable, comma-separated list of the configuration fields that are
+   * still missing for the current provider (empty when fully configured).
+   */
+  private missingConfigSummary(): string {
+    if (!this.ui) {
+      return '';
+    }
+    const missing: string[] = [];
+    if (!this.ui.apiKeyInput.value.trim()) {
+      missing.push(this.currentProviderConfig().keyLabel);
+    }
+    if (!this.ui.modelIdInput.value.trim()) {
+      missing.push('model');
+    }
+    if (
+      this.state.providerId === 'bedrock' &&
+      !this.ui.bedrockRegionInput.value.trim()
+    ) {
+      missing.push('region');
+    }
+    return missing.join(', ');
+  }
+
+  private readyLogMessage(): string {
+    if (this.isConfigured()) {
+      return 'Browser-only Strands MapLibre agent ready.';
+    }
+    const missing = this.missingConfigSummary();
+    return missing
+      ? `Browser-only Strands MapLibre agent loaded. Add your ${missing} to start.`
+      : 'Browser-only Strands MapLibre agent loaded.';
+  }
+
+  /**
+   * Refresh the idle status badge so it reflects whether the agent has the
+   * credentials it needs. Transient run statuses (Running, Cancelled, Error,
+   * Copied) are left untouched unless `force` is set, so this can be called
+   * from updateControls() on every keystroke without clobbering them.
+   */
+  private applyIdleStatus(force = false): void {
+    // A forced refresh (run finished, copy timeout, mount) must win even while
+    // `busy` is still set, otherwise the badge stays stuck on "Running" because
+    // the post-run call happens before the finally block clears `busy`.
+    if (!this.ui || (this.state.busy && !force)) {
+      return;
+    }
+    if (!force && !IDLE_STATUS_LABELS.has(this.ui.status.textContent ?? '')) {
+      return;
+    }
+    if (this.isConfigured()) {
+      this.setStatus(STATUS_READY, 'connected');
+    } else {
+      this.setStatus(STATUS_SETUP, 'setup');
+    }
+  }
+
   private appendLog(role: string, text: string, markdown = text): HTMLDivElement {
     if (!this.ui) {
       throw new Error('GeoAgent control UI is not mounted.');
@@ -1139,22 +1225,28 @@ export class GeoAgentControl implements IControl {
       textarea.remove();
     }
     this.setStatus('Copied', 'connected');
-    window.setTimeout(() => this.setStatus('Ready', 'connected'), 1200);
+    window.setTimeout(() => this.applyIdleStatus(true), 1200);
   }
 
   private updateControls(): void {
     if (!this.ui) {
       return;
     }
+    const configured = this.isConfigured();
     this.ui.sendButton.disabled =
-      this.state.busy ||
-      !this.ui.prompt.value.trim() ||
-      !this.ui.apiKeyInput.value.trim() ||
-      !this.ui.modelIdInput.value.trim() ||
-      (this.state.providerId === 'bedrock' && !this.ui.bedrockRegionInput.value.trim());
+      this.state.busy || !this.ui.prompt.value.trim() || !configured;
+    if (configured) {
+      this.ui.sendButton.removeAttribute('title');
+    } else {
+      const missing = this.missingConfigSummary();
+      this.ui.sendButton.title = missing
+        ? `Add your ${missing} to send a prompt.`
+        : 'Configuration required to send a prompt.';
+    }
     this.ui.cancelButton.disabled = !this.state.busy || this.cancelRequested;
     this.ui.clearButton.disabled = this.state.busy;
     this.ui.copyButton.disabled = this.ui.log.childElementCount === 0;
+    this.applyIdleStatus();
   }
 
   private invalidateAgent(): void {
@@ -1344,7 +1436,11 @@ export class GeoAgentControl implements IControl {
       } else {
         this.appendAssistantLog(answer);
       }
-      this.setStatus(abortController.signal.aborted ? 'Cancelled' : 'Ready', 'connected');
+      if (abortController.signal.aborted) {
+        this.setStatus('Cancelled', 'connected');
+      } else {
+        this.applyIdleStatus(true);
+      }
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       if (abortController.signal.aborted) {
