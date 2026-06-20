@@ -322,6 +322,66 @@ describe("GeoAgentControl", () => {
     map.cleanup();
   });
 
+  it("reports a setup status until credentials are provided", () => {
+    const map = new MockMap();
+    const control = new GeoAgentControl({ storagePrefix: "geoagent.setup" });
+    const container = control.onAdd(map as never);
+    map.controlStack.appendChild(container);
+
+    const status =
+      map.mapContainer.querySelector<HTMLSpanElement>(".geoagent-status")!;
+    const sendButton =
+      map.mapContainer.querySelector<HTMLButtonElement>(".geoagent-send")!;
+    const firstEntry =
+      map.mapContainer.querySelector<HTMLElement>(".geoagent-entry .geoagent-text");
+
+    // No API key yet: the badge must not claim the agent is ready.
+    expect(status.textContent).toBe("Setup required");
+    expect(status.className).toContain("setup");
+    expect(status.className).not.toContain("connected");
+    expect(sendButton.disabled).toBe(true);
+    expect(sendButton.title).toContain("OpenAI API Key");
+    expect(firstEntry?.textContent).toContain("Add your OpenAI API Key");
+
+    // Supplying the key flips the badge to a genuine ready state.
+    const apiKeyInput =
+      map.mapContainer.querySelector<HTMLInputElement>(".geoagent-api-key")!;
+    apiKeyInput.value = "sk-test";
+    apiKeyInput.dispatchEvent(new Event("input", { bubbles: true }));
+
+    expect(status.textContent).toBe("Ready");
+    expect(status.className).toContain("connected");
+    expect(status.className).not.toContain("setup");
+    expect(sendButton.title).toBe("");
+
+    const prompt =
+      map.mapContainer.querySelector<HTMLTextAreaElement>(".geoagent-prompt")!;
+    prompt.value = "Zoom to San Francisco";
+    prompt.dispatchEvent(new Event("input", { bubbles: true }));
+    expect(sendButton.disabled).toBe(false);
+
+    control.onRemove();
+    map.cleanup();
+  });
+
+  it("starts ready when an initial API key is provided", () => {
+    const map = new MockMap();
+    const control = new GeoAgentControl({
+      storagePrefix: "geoagent.ready",
+      apiKeys: { "openai-responses": "sk-test" },
+    });
+    const container = control.onAdd(map as never);
+    map.controlStack.appendChild(container);
+
+    const status =
+      map.mapContainer.querySelector<HTMLSpanElement>(".geoagent-status")!;
+    expect(status.textContent).toBe("Ready");
+    expect(status.className).toContain("connected");
+
+    control.onRemove();
+    map.cleanup();
+  });
+
   it("shows Earth Engine settings in the main panel when enabled", () => {
     const storagePrefix = "geoagent.ee.panel";
     sessionStorage.removeItem(`${storagePrefix}.earthEngine.projectId`);
@@ -458,7 +518,9 @@ describe("GeoAgentControl", () => {
       value: { writeText },
     });
     const map = new MockMap();
-    const control = new GeoAgentControl();
+    const control = new GeoAgentControl({
+      apiKeys: { "openai-responses": "sk-test" },
+    });
     const container = control.onAdd(map as never);
     map.controlStack.appendChild(container);
     const copyButton =
