@@ -799,9 +799,9 @@ export class GeoAgentControl implements IControl {
       this.state.modelId = this.initialModelId(providerId);
       this.loadProviderSettings();
       this.invalidateAgent();
+      // resetVerification() also clears the loaded model list.
       this.resetVerification();
       this.hideConfigNote();
-      this.populateModelOptions([]);
       this.applyIdleStatus(true);
       this.updateControls();
       this.emit('statechange');
@@ -1199,7 +1199,7 @@ export class GeoAgentControl implements IControl {
     }
     if (
       this.currentProviderConfig().requiresBaseUrl &&
-      !this.ui.baseUrlInput.value.trim()
+      !this.isValidBaseUrl(this.ui.baseUrlInput.value)
     ) {
       return false;
     }
@@ -1220,7 +1220,7 @@ export class GeoAgentControl implements IControl {
     }
     if (
       this.currentProviderConfig().requiresBaseUrl &&
-      !this.ui.baseUrlInput.value.trim()
+      !this.isValidBaseUrl(this.ui.baseUrlInput.value)
     ) {
       missing.push('API base URL');
     }
@@ -1419,7 +1419,7 @@ export class GeoAgentControl implements IControl {
     }
     if (
       this.currentProviderConfig().requiresBaseUrl &&
-      !this.ui.baseUrlInput.value.trim()
+      !this.isValidBaseUrl(this.ui.baseUrlInput.value)
     ) {
       return false;
     }
@@ -1476,6 +1476,9 @@ export class GeoAgentControl implements IControl {
     // Bump the token so an in-flight request cannot apply a stale result.
     this.verifyToken++;
     this.verifyState = 'idle';
+    // Drop the model list loaded for the previous key/endpoint so the user
+    // cannot pick a model that belongs to different credentials.
+    this.populateModelOptions([]);
   }
 
   private setVerifyState(state: VerifyState): void {
@@ -1613,6 +1616,24 @@ export class GeoAgentControl implements IControl {
     return baseUrl.trim().replace(/\/+$/, '');
   }
 
+  /**
+   * Whether a custom base URL is an absolute http(s) URL. Relative values (e.g.
+   * `api` or `/proxy`) would resolve against the app origin and leak the API key
+   * to the wrong endpoint, so they are rejected.
+   */
+  private isValidBaseUrl(baseUrl: string): boolean {
+    const trimmed = baseUrl.trim();
+    if (!trimmed) {
+      return false;
+    }
+    try {
+      const url = new URL(trimmed);
+      return url.protocol === 'http:' || url.protocol === 'https:';
+    } catch {
+      return false;
+    }
+  }
+
   private async fetchProviderModels(
     provider: GeoAgentProviderConfig,
     apiKey: string,
@@ -1641,20 +1662,21 @@ export class GeoAgentControl implements IControl {
     init: RequestInit,
   ): Promise<unknown> {
     const controller = new AbortController();
+    // Keep the timeout armed through body parsing: a provider that sends headers
+    // and then stalls the body must still abort within the window.
     const timer = setTimeout(() => controller.abort(), VERIFY_TIMEOUT_MS);
-    let response: Response;
     try {
-      response = await fetch(url, { ...init, signal: controller.signal });
+      const response = await fetch(url, { ...init, signal: controller.signal });
+      if (response.status === 401 || response.status === 403) {
+        throw new ProviderAuthError('The provider rejected this API key.');
+      }
+      if (!response.ok) {
+        throw new Error(`Model list request failed (HTTP ${response.status}).`);
+      }
+      return await response.json();
     } finally {
       clearTimeout(timer);
     }
-    if (response.status === 401 || response.status === 403) {
-      throw new ProviderAuthError('The provider rejected this API key.');
-    }
-    if (!response.ok) {
-      throw new Error(`Model list request failed (HTTP ${response.status}).`);
-    }
-    return response.json();
   }
 
   private async fetchOpenAiModels(
@@ -1809,8 +1831,8 @@ export class GeoAgentControl implements IControl {
     if (provider.id === 'bedrock' && !bedrockRegion) {
       throw new Error('Bedrock region is required.');
     }
-    if (provider.requiresBaseUrl && !baseUrl) {
-      throw new Error('API base URL is required.');
+    if (provider.requiresBaseUrl && !this.isValidBaseUrl(baseUrl)) {
+      throw new Error('A valid http(s) API base URL is required.');
     }
 
     const signature = JSON.stringify({

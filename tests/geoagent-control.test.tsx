@@ -524,10 +524,16 @@ describe("GeoAgentControl", () => {
     apiKeyInput.dispatchEvent(new Event("change", { bubbles: true }));
     expect(status.textContent).toBe("Setup required");
 
-    baseUrlInput.value = "https://llm.example.com/v1";
+    // A relative base URL would resolve against the app origin and leak the key,
+    // so it must not count as configured even with a key and model present.
+    baseUrlInput.value = "/proxy";
     baseUrlInput.dispatchEvent(new Event("input", { bubbles: true }));
     modelInput.value = "local-model";
     modelInput.dispatchEvent(new Event("input", { bubbles: true }));
+    expect(status.textContent).toBe("Setup required");
+
+    baseUrlInput.value = "https://llm.example.com/v1";
+    baseUrlInput.dispatchEvent(new Event("input", { bubbles: true }));
 
     expect(control.getState()).toMatchObject({
       providerId: "openai-compatible",
