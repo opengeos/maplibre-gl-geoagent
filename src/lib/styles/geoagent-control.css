@@ -172,6 +172,11 @@ body.geoagent-panel-resizing {
   color: #b54708;
 }
 
+.geoagent-status.connecting {
+  background: #e0eaff;
+  color: #1d4ed8;
+}
+
 .geoagent-status.error {
   background: #fee4e2;
   color: #b42318;
@@ -270,16 +275,67 @@ body.geoagent-panel-resizing {
   align-items: end;
 }
 
-.geoagent-settings-grid label:nth-child(3) {
+/* The model cell, optional base URL / region rows, and the inline config note
+   each occupy their own full-width row beneath the provider + key row. */
+.geoagent-settings-grid .geoagent-model-cell,
+.geoagent-settings-grid .geoagent-base-url-row,
+.geoagent-settings-grid .geoagent-bedrock-region-row,
+.geoagent-settings-grid .geoagent-config-note {
   grid-column: 1 / -1;
 }
 
-.geoagent-settings-grid:has(.geoagent-bedrock-region-row:not([hidden])) label:nth-child(3) {
-  grid-column: auto;
+.geoagent-bedrock-region-row[hidden],
+.geoagent-base-url-row[hidden],
+.geoagent-config-note[hidden] {
+  display: none;
 }
 
-.geoagent-bedrock-region-row[hidden] {
+.geoagent-model-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.geoagent-model-row .geoagent-model-id {
+  flex: 1 1 auto;
+}
+
+.geoagent-panel button.geoagent-load-models {
+  flex: 0 0 auto;
+  min-height: 36px;
+  padding: 0 12px;
+  white-space: nowrap;
+}
+
+.geoagent-model-select {
+  margin-top: 6px;
+}
+
+.geoagent-model-select[hidden] {
   display: none;
+}
+
+.geoagent-config-note {
+  padding: 6px 9px;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.35;
+}
+
+.geoagent-config-note.success {
+  background: #dff6ee;
+  color: #076448;
+}
+
+.geoagent-config-note.error {
+  background: #fee4e2;
+  color: #b42318;
+}
+
+.geoagent-config-note.info {
+  background: #eef2f7;
+  color: #475569;
 }
 
 .geoagent-earth-engine {
