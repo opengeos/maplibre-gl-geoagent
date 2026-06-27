@@ -6,7 +6,8 @@ export type GeoAgentProviderId =
   | 'openai-chat'
   | 'anthropic'
   | 'google'
-  | 'bedrock';
+  | 'bedrock'
+  | 'openai-compatible';
 
 export interface GeoAgentProviderConfig {
   id: GeoAgentProviderId;
@@ -16,6 +17,13 @@ export interface GeoAgentProviderConfig {
   storageKey: string;
   defaultModel: string;
   defaultRegion?: string;
+  /**
+   * Whether the provider needs a user-supplied API base URL (OpenAI-compatible
+   * / custom endpoints such as a local LLM server or a private deployment).
+   */
+  requiresBaseUrl?: boolean;
+  /** Placeholder shown in the API base URL field. */
+  baseUrlPlaceholder?: string;
 }
 
 export interface GeoAgentControlOptions {
@@ -143,6 +151,8 @@ export interface GeoAgentState {
   providerId: GeoAgentProviderId;
   modelId: string;
   bedrockRegion: string;
+  /** API base URL for the OpenAI-compatible / custom provider. */
+  baseUrl: string;
   allowCodeExecution: boolean;
   allowDestructiveTools: boolean;
   data?: Record<string, unknown>;

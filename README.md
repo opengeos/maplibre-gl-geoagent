@@ -12,7 +12,9 @@ inspect and operate on the live map through dedicated browser tools.
 ## Features
 
 - Collapsible MapLibre control with a floating chat panel
-- Browser provider UI for OpenAI Responses, OpenAI Chat, Anthropic, Google Gemini, and Amazon Bedrock
+- Browser provider UI for OpenAI Responses, OpenAI Chat, Anthropic, Google Gemini, Amazon Bedrock, and any OpenAI-compatible/custom endpoint
+- API keys are saved on commit (Enter or blur) with an inline confirmation, then checked against the provider: an invalid key keeps the chat locked, while a verified key (or one that could not be reached for verification) unlocks it
+- One-click "Load models" lists the provider's available models into a dropdown
 - Map tools for camera movement, projection, basemaps, markers, GeoJSON, XYZ tiles, layer visibility, opacity, feature queries, screenshots, and layer cleanup
 - Optional Google Earth Engine tools for catalog search, OAuth initialization, dataset tile layers, normalized difference indexes, visualization updates, snippets, and bounded statistics
 - Optional MapLibre JavaScript execution tool, disabled by default
@@ -112,10 +114,33 @@ Supported providers:
 - Anthropic
 - Google Gemini
 - Amazon Bedrock
+- OpenAI-Compatible (Custom)
 
 For Bedrock, select `Amazon Bedrock`, enter a Bedrock API key, choose a Bedrock
 Converse model ID, and set the AWS region. The default Bedrock model is
 `global.anthropic.claude-sonnet-4-6`, and the default region is `us-west-2`.
+
+For a custom or self-hosted model, select `OpenAI-Compatible (Custom)`, enter the
+API base URL of an OpenAI-compatible endpoint (for example a local LLM server or
+a private deployment), supply the API key, and enter or load a model ID. The
+endpoint is called with the OpenAI Chat Completions API shape.
+
+### Saving and verifying keys
+
+The API key is written to `sessionStorage` only when you commit it (press Enter
+or move focus out of the field), so a half-typed key never flips the status
+badge to "Ready". After a key is committed the control calls the provider's
+model-list endpoint to verify it: a success marks the connection ready and
+populates the model dropdown, an authentication error marks the key invalid and
+keeps the prompt locked, and a network/CORS failure leaves the key usable but
+unverified so a provider that does not allow browser model listing never blocks
+you. Use the "Load models" button to re-run this check at any time.
+
+Auto-verification on commit only runs once the control has everything it needs
+to call the endpoint. For `OpenAI-Compatible (Custom)` that means the API base
+URL must already be a valid `http(s)` URL when you commit the key; otherwise
+finish entering the base URL first, then press "Load models" to verify and load
+the model list.
 
 ## Options
 

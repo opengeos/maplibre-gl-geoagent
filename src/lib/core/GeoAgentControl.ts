@@ -22,14 +22,38 @@ import type {
 const DEFAULT_PROVIDER: GeoAgentProviderId = 'openai-responses';
 const DEFAULT_STORAGE_PREFIX = 'geoagent.maplibre';
 
+const DEFAULT_PROMPT_PLACEHOLDER =
+  'Add a red marker for San Francisco and zoom to it.';
+
+// How long the API key list/verification request may run before it is treated
+// as "could not verify" so the UI never hangs on a stalled provider endpoint.
+const VERIFY_TIMEOUT_MS = 15000;
+
 // Status badge labels that represent an idle (not mid-run) state. The idle
 // status is recomputed from the current configuration, so it may flip between
-// these as the user fills in or clears credentials. Transient run statuses
-// (Running, Cancelled, Error, Copied) are intentionally excluded so they are
-// not clobbered by configuration changes.
+// these as the user fills in or clears credentials. Transient statuses
+// (Running, Cancelled, Error, Copied, Verifying, Invalid API key) are
+// intentionally excluded so they are not clobbered by configuration changes.
 const STATUS_READY = 'Ready';
 const STATUS_SETUP = 'Setup required';
+const STATUS_VERIFYING = 'Verifying…';
+const STATUS_INVALID = 'Invalid API key';
 const IDLE_STATUS_LABELS = new Set<string>([STATUS_READY, STATUS_SETUP]);
+
+// Tracks whether the committed credentials for the current provider have been
+// checked against the provider's API.
+//   idle       no check has run for the current key
+//   verifying  a check is in flight
+//   ok         the provider accepted the key (models were listed)
+//   invalid    the provider rejected the key (HTTP 401/403)
+//   unverified the check could not complete (network/CORS/unsupported) — the
+//              key is not known to be bad, so the prompt is not blocked
+type VerifyState = 'idle' | 'verifying' | 'ok' | 'invalid' | 'unverified';
+
+// Marks a model-list failure as an authentication problem (a bad key) so it can
+// be distinguished from a network/CORS/unsupported failure that must not block
+// the user.
+class ProviderAuthError extends Error {}
 
 const BASE_PROVIDER_CONFIGS: Record<
   GeoAgentProviderId,
@@ -71,6 +95,17 @@ const BASE_PROVIDER_CONFIGS: Record<
     defaultModel: 'global.anthropic.claude-sonnet-4-6',
     defaultRegion: 'us-west-2',
   },
+  'openai-compatible': {
+    id: 'openai-compatible',
+    label: 'OpenAI-Compatible (Custom)',
+    keyLabel: 'API Key',
+    keyPlaceholder: 'sk-... or token',
+    // No default model: custom endpoints expose their own model names, so the
+    // user enters one or loads the list from the endpoint.
+    defaultModel: '',
+    requiresBaseUrl: true,
+    baseUrlPlaceholder: 'https://host/v1',
+  },
 };
 
 const BROWSER_MAPLIBRE_SYSTEM_PROMPT = `You are an AI assistant embedded in a browser web app with direct access to a live MapLibre map through dedicated browser tools.
@@ -93,7 +128,12 @@ interface GeoAgentUi {
   providerSelect: HTMLSelectElement;
   apiKeyLabel: HTMLSpanElement;
   apiKeyInput: HTMLInputElement;
+  baseUrlLabel: HTMLLabelElement;
+  baseUrlInput: HTMLInputElement;
   modelIdInput: HTMLInputElement;
+  modelSelect: HTMLSelectElement;
+  loadModelsButton: HTMLButtonElement;
+  configNote: HTMLDivElement;
   bedrockRegionLabel: HTMLLabelElement;
   bedrockRegionInput: HTMLInputElement;
   earthEngineDetails: HTMLDetailsElement;
@@ -196,6 +236,15 @@ export class GeoAgentControl implements IControl {
   private panelResizeUpHandler: (() => void) | null = null;
   private activeAbortController: AbortController | null = null;
   private cancelRequested = false;
+  // The API key the agent actually uses. Updated only when the user commits the
+  // key field (Enter or blur), never on every keystroke, so a half-typed key
+  // does not flip the badge to "Ready" or get written to storage.
+  private committedApiKey = '';
+  private verifyState: VerifyState = 'idle';
+  // Incremented on every verification so a slow earlier request cannot apply its
+  // result over a newer key/provider.
+  private verifyToken = 0;
+  private configNoteTimer: ReturnType<typeof setTimeout> | null = null;
 
   constructor(options: GeoAgentControlOptions = {}) {
     this.options = {
@@ -231,6 +280,7 @@ export class GeoAgentControl implements IControl {
       providerId,
       modelId: this.initialModelId(providerId),
       bedrockRegion: this.initialBedrockRegion(),
+      baseUrl: this.initialBaseUrl(providerId),
       allowCodeExecution: this.options.allowCodeExecutionDefault,
       allowDestructiveTools: this.options.allowDestructiveToolsDefault,
       data: {},
@@ -278,6 +328,11 @@ export class GeoAgentControl implements IControl {
       this.mapResizeHandler = null;
     }
     this.stopPanelResize();
+    if (this.configNoteTimer !== null) {
+      clearTimeout(this.configNoteTimer);
+      this.configNoteTimer = null;
+    }
+    this.verifyToken++;
     this.activeAbortController?.abort();
     this.agent?.cancel();
     this.activeAbortController = null;
@@ -400,6 +455,7 @@ export class GeoAgentControl implements IControl {
       anthropic: this.providerConfig('anthropic'),
       google: this.providerConfig('google'),
       bedrock: this.providerConfig('bedrock'),
+      'openai-compatible': this.providerConfig('openai-compatible'),
     };
   }
 
@@ -433,6 +489,14 @@ export class GeoAgentControl implements IControl {
 
   private bedrockRegionStorageKey(): string {
     return `${this.options.storagePrefix}.bedrock.region`;
+  }
+
+  private baseUrlStorageKey(providerId: GeoAgentProviderId): string {
+    return `${this.options.storagePrefix}.baseUrl.${providerId}`;
+  }
+
+  private initialBaseUrl(providerId: GeoAgentProviderId): string {
+    return storageGet(this.baseUrlStorageKey(providerId)) || '';
   }
 
   private earthEngineProjectIdStorageKey(): string {
@@ -527,14 +591,23 @@ export class GeoAgentControl implements IControl {
           <span class="geoagent-api-key-label">API Key</span>
           <input class="geoagent-api-key" type="password" autocomplete="off" placeholder="sk-..." />
         </label>
-        <label>
-          Model
-          <input class="geoagent-model-id" />
+        <label class="geoagent-base-url-row" hidden>
+          API Base URL
+          <input class="geoagent-base-url" autocomplete="off" placeholder="https://host/v1" />
         </label>
         <label class="geoagent-bedrock-region-row" hidden>
           Region
           <input class="geoagent-bedrock-region" autocomplete="off" placeholder="us-west-2" />
         </label>
+        <label class="geoagent-model-cell">
+          Model
+          <div class="geoagent-model-row">
+            <input class="geoagent-model-id" />
+            <button class="geoagent-load-models secondary" type="button">Load models</button>
+          </div>
+          <select class="geoagent-model-select" aria-label="Available models" hidden></select>
+        </label>
+        <div class="geoagent-config-note" aria-live="polite" hidden></div>
       </div>
 
       <details class="geoagent-earth-engine">
@@ -585,7 +658,12 @@ export class GeoAgentControl implements IControl {
       providerSelect: this.requiredElement(content, '.geoagent-provider'),
       apiKeyLabel: this.requiredElement(content, '.geoagent-api-key-label'),
       apiKeyInput: this.requiredElement(content, '.geoagent-api-key'),
+      baseUrlLabel: this.requiredElement(content, '.geoagent-base-url-row'),
+      baseUrlInput: this.requiredElement(content, '.geoagent-base-url'),
       modelIdInput: this.requiredElement(content, '.geoagent-model-id'),
+      modelSelect: this.requiredElement(content, '.geoagent-model-select'),
+      loadModelsButton: this.requiredElement(content, '.geoagent-load-models'),
+      configNote: this.requiredElement(content, '.geoagent-config-note'),
       bedrockRegionLabel: this.requiredElement(content, '.geoagent-bedrock-region-row'),
       bedrockRegionInput: this.requiredElement(content, '.geoagent-bedrock-region'),
       earthEngineDetails: this.requiredElement(content, '.geoagent-earth-engine'),
@@ -721,19 +799,49 @@ export class GeoAgentControl implements IControl {
       this.state.modelId = this.initialModelId(providerId);
       this.loadProviderSettings();
       this.invalidateAgent();
+      // resetVerification() also clears the loaded model list.
+      this.resetVerification();
+      this.hideConfigNote();
+      this.applyIdleStatus(true);
       this.updateControls();
       this.emit('statechange');
     });
-    ui.apiKeyInput.addEventListener('input', () => {
-      const apiKey = ui.apiKeyInput.value.trim();
-      const storageKey = this.currentProviderConfig().storageKey;
-      if (apiKey) {
-        storageSet(storageKey, apiKey);
+    // The key is saved (and the badge/connection re-evaluated) only when the
+    // user commits it, not on every keystroke: a half-typed key must not flip
+    // the badge to "Ready" or be written to storage. Commit happens on Enter or
+    // when the field loses focus (the native `change` event).
+    ui.apiKeyInput.addEventListener('input', () => this.handleApiKeyEdited());
+    ui.apiKeyInput.addEventListener('change', () => this.commitApiKey());
+    ui.apiKeyInput.addEventListener('keydown', (event) => {
+      if (event.key === 'Enter' && !event.isComposing) {
+        event.preventDefault();
+        this.commitApiKey();
+      }
+    });
+    ui.baseUrlInput.addEventListener('input', () => {
+      const baseUrl = ui.baseUrlInput.value.trim();
+      this.state.baseUrl = baseUrl;
+      if (baseUrl) {
+        storageSet(this.baseUrlStorageKey(this.state.providerId), baseUrl);
       } else {
-        storageRemove(storageKey);
+        storageRemove(this.baseUrlStorageKey(this.state.providerId));
       }
       this.invalidateAgent();
+      // A different endpoint invalidates a prior verification result.
+      this.resetVerification();
       this.updateControls();
+      this.emit('statechange');
+    });
+    ui.loadModelsButton.addEventListener('click', () => {
+      void this.verifyAndLoadModels();
+    });
+    ui.modelSelect.addEventListener('change', () => {
+      const modelId = ui.modelSelect.value;
+      if (!modelId) {
+        return;
+      }
+      ui.modelIdInput.value = modelId;
+      ui.modelIdInput.dispatchEvent(new Event('input', { bubbles: true }));
     });
     ui.modelIdInput.addEventListener('input', () => {
       const modelId = ui.modelIdInput.value.trim();
@@ -1018,6 +1126,8 @@ export class GeoAgentControl implements IControl {
     this.ui.modelIdInput.value = this.state.modelId;
     this.ui.bedrockRegionInput.value = this.state.bedrockRegion;
     this.ui.bedrockRegionLabel.hidden = this.state.providerId !== 'bedrock';
+    this.ui.baseUrlInput.value = this.state.baseUrl;
+    this.ui.baseUrlLabel.hidden = !this.currentProviderConfig().requiresBaseUrl;
     this.ui.allowCodeInput.checked = this.state.allowCodeExecution;
     this.ui.allowDestructiveInput.checked = this.state.allowDestructiveTools;
   }
@@ -1042,12 +1152,17 @@ export class GeoAgentControl implements IControl {
     this.state.providerId = provider.id;
     this.state.modelId =
       storageGet(this.modelStorageKey(provider.id)) || provider.defaultModel;
+    this.committedApiKey = storageGet(provider.storageKey) || initialApiKey;
     this.ui.providerSelect.value = provider.id;
     this.ui.apiKeyLabel.textContent = provider.keyLabel;
     this.ui.apiKeyInput.placeholder = provider.keyPlaceholder;
-    this.ui.apiKeyInput.value = storageGet(provider.storageKey) || initialApiKey;
+    this.ui.apiKeyInput.value = this.committedApiKey;
     this.ui.modelIdInput.value = this.state.modelId;
-    this.ui.modelIdInput.placeholder = provider.defaultModel;
+    this.ui.modelIdInput.placeholder = provider.defaultModel || 'Model name';
+    this.state.baseUrl = this.initialBaseUrl(provider.id);
+    this.ui.baseUrlInput.value = this.state.baseUrl;
+    this.ui.baseUrlInput.placeholder = provider.baseUrlPlaceholder || 'https://host/v1';
+    this.ui.baseUrlLabel.hidden = !provider.requiresBaseUrl;
     this.state.bedrockRegion = this.initialBedrockRegion();
     this.ui.bedrockRegionInput.value = this.state.bedrockRegion;
     this.ui.bedrockRegionInput.placeholder = provider.defaultRegion || 'us-west-2';
@@ -1071,12 +1186,20 @@ export class GeoAgentControl implements IControl {
     if (!this.ui) {
       return false;
     }
-    if (!this.ui.apiKeyInput.value.trim() || !this.ui.modelIdInput.value.trim()) {
+    // Uses the committed key (not the live input) so typing a key does not flip
+    // the badge to "Ready" before the user commits it.
+    if (!this.committedApiKey.trim() || !this.ui.modelIdInput.value.trim()) {
       return false;
     }
     if (
       this.state.providerId === 'bedrock' &&
       !this.ui.bedrockRegionInput.value.trim()
+    ) {
+      return false;
+    }
+    if (
+      this.currentProviderConfig().requiresBaseUrl &&
+      !this.isValidBaseUrl(this.ui.baseUrlInput.value)
     ) {
       return false;
     }
@@ -1092,8 +1215,14 @@ export class GeoAgentControl implements IControl {
       return '';
     }
     const missing: string[] = [];
-    if (!this.ui.apiKeyInput.value.trim()) {
+    if (!this.committedApiKey.trim()) {
       missing.push(this.currentProviderConfig().keyLabel);
+    }
+    if (
+      this.currentProviderConfig().requiresBaseUrl &&
+      !this.isValidBaseUrl(this.ui.baseUrlInput.value)
+    ) {
+      missing.push('API base URL');
     }
     if (!this.ui.modelIdInput.value.trim()) {
       missing.push('model');
@@ -1233,20 +1362,380 @@ export class GeoAgentControl implements IControl {
       return;
     }
     const configured = this.isConfigured();
+    // The prompt and Send button stay locked until the agent is configured, the
+    // key is not known to be invalid, and no verification is in flight, so the
+    // user cannot draft or send a message that has nowhere to go.
+    const blocked =
+      !configured ||
+      this.verifyState === 'invalid' ||
+      this.verifyState === 'verifying';
+    this.ui.prompt.disabled = this.state.busy || blocked;
+    this.ui.prompt.placeholder = blocked
+      ? this.blockedPromptHint(configured)
+      : DEFAULT_PROMPT_PLACEHOLDER;
     this.ui.sendButton.disabled =
-      this.state.busy || !this.ui.prompt.value.trim() || !configured;
-    if (configured) {
+      this.state.busy || !this.ui.prompt.value.trim() || blocked;
+    if (!blocked) {
       this.ui.sendButton.removeAttribute('title');
+    } else if (this.verifyState === 'invalid') {
+      this.ui.sendButton.title = 'Fix the API key to send a prompt.';
+    } else if (this.verifyState === 'verifying') {
+      this.ui.sendButton.title = 'Verifying the connection…';
     } else {
       const missing = this.missingConfigSummary();
       this.ui.sendButton.title = missing
         ? `Add your ${missing} to send a prompt.`
         : 'Configuration required to send a prompt.';
     }
+    this.ui.loadModelsButton.disabled =
+      this.state.busy || this.verifyState === 'verifying' || !this.canVerify();
     this.ui.cancelButton.disabled = !this.state.busy || this.cancelRequested;
     this.ui.clearButton.disabled = this.state.busy;
     this.ui.copyButton.disabled = this.ui.log.childElementCount === 0;
     this.applyIdleStatus();
+  }
+
+  /** Placeholder hint shown in the prompt field while it is locked. */
+  private blockedPromptHint(configured: boolean): string {
+    if (this.verifyState === 'verifying') {
+      return 'Verifying the connection…';
+    }
+    if (this.verifyState === 'invalid') {
+      return 'The API key was rejected. Fix it to start.';
+    }
+    const missing = configured ? '' : this.missingConfigSummary();
+    return missing
+      ? `Add your ${missing} to start.`
+      : 'Configure a provider to start.';
+  }
+
+  /**
+   * Whether there is enough committed configuration to attempt a live
+   * verification / model-list request for the current provider.
+   */
+  private canVerify(): boolean {
+    if (!this.ui || !this.committedApiKey.trim()) {
+      return false;
+    }
+    if (
+      this.currentProviderConfig().requiresBaseUrl &&
+      !this.isValidBaseUrl(this.ui.baseUrlInput.value)
+    ) {
+      return false;
+    }
+    return true;
+  }
+
+  /** React to an in-progress edit of the API key without committing it. */
+  private handleApiKeyEdited(): void {
+    if (!this.ui) {
+      return;
+    }
+    const value = this.ui.apiKeyInput.value.trim();
+    if (value && value !== this.committedApiKey) {
+      this.showConfigNote('Press Enter to save your API key.', 'info', false);
+    } else if (!value) {
+      this.hideConfigNote();
+    }
+    this.updateControls();
+  }
+
+  /**
+   * Persist the typed API key, refresh the connection state, and (when a usable
+   * key was entered) verify it against the provider in the background.
+   */
+  private commitApiKey(): void {
+    if (!this.ui) {
+      return;
+    }
+    const apiKey = this.ui.apiKeyInput.value.trim();
+    const changed = apiKey !== this.committedApiKey;
+    this.committedApiKey = apiKey;
+    const storageKey = this.currentProviderConfig().storageKey;
+    if (apiKey) {
+      storageSet(storageKey, apiKey);
+    } else {
+      storageRemove(storageKey);
+    }
+    this.invalidateAgent();
+    this.resetVerification();
+    if (apiKey) {
+      this.showConfigNote('API key saved.', 'success', true);
+    } else {
+      this.hideConfigNote();
+    }
+    this.applyIdleStatus(true);
+    this.updateControls();
+    if (apiKey && changed && this.canVerify()) {
+      void this.verifyAndLoadModels();
+    }
+  }
+
+  /** Clear any verification result so the connection state is re-evaluated. */
+  private resetVerification(): void {
+    // Bump the token so an in-flight request cannot apply a stale result.
+    this.verifyToken++;
+    this.verifyState = 'idle';
+    // Drop the model list loaded for the previous key/endpoint so the user
+    // cannot pick a model that belongs to different credentials.
+    this.populateModelOptions([]);
+  }
+
+  private setVerifyState(state: VerifyState): void {
+    this.verifyState = state;
+    if (!this.ui || this.state.busy) {
+      this.updateControls();
+      return;
+    }
+    if (state === 'verifying') {
+      this.setStatus(STATUS_VERIFYING, 'connecting');
+    } else if (state === 'invalid') {
+      this.setStatus(STATUS_INVALID, 'error');
+    } else {
+      this.applyIdleStatus(true);
+    }
+    this.updateControls();
+  }
+
+  private showConfigNote(
+    text: string,
+    kind: 'success' | 'error' | 'info',
+    autoHide: boolean,
+  ): void {
+    if (!this.ui) {
+      return;
+    }
+    this.ui.configNote.textContent = text;
+    this.ui.configNote.className = `geoagent-config-note ${kind}`;
+    this.ui.configNote.hidden = false;
+    if (this.configNoteTimer !== null) {
+      clearTimeout(this.configNoteTimer);
+      this.configNoteTimer = null;
+    }
+    if (autoHide) {
+      this.configNoteTimer = setTimeout(() => this.hideConfigNote(), 5000);
+    }
+  }
+
+  private hideConfigNote(): void {
+    if (this.configNoteTimer !== null) {
+      clearTimeout(this.configNoteTimer);
+      this.configNoteTimer = null;
+    }
+    if (this.ui) {
+      this.ui.configNote.hidden = true;
+      this.ui.configNote.textContent = '';
+    }
+  }
+
+  /**
+   * Ask the current provider for its model list. A success both verifies the
+   * key and populates the model dropdown; an authentication failure marks the
+   * key invalid; any other failure (network/CORS/unsupported) leaves the key
+   * usable but unverified so the user is never blocked by a provider that does
+   * not allow browser model listing.
+   */
+  private async verifyAndLoadModels(): Promise<void> {
+    if (!this.ui || !this.canVerify()) {
+      return;
+    }
+    const provider = this.currentProviderConfig();
+    const apiKey = this.committedApiKey.trim();
+    const baseUrl = this.ui.baseUrlInput.value.trim();
+    const region = this.ui.bedrockRegionInput.value.trim();
+    const token = ++this.verifyToken;
+    this.setVerifyState('verifying');
+    this.showConfigNote('Verifying connection…', 'info', false);
+    try {
+      const models = await this.fetchProviderModels(
+        provider,
+        apiKey,
+        baseUrl,
+        region,
+      );
+      if (token !== this.verifyToken) {
+        return;
+      }
+      this.populateModelOptions(models);
+      this.setVerifyState('ok');
+      this.showConfigNote(
+        models.length
+          ? `Connection verified. ${models.length} models available.`
+          : 'Connection verified.',
+        'success',
+        true,
+      );
+    } catch (error) {
+      if (token !== this.verifyToken) {
+        return;
+      }
+      if (error instanceof ProviderAuthError) {
+        this.setVerifyState('invalid');
+        this.showConfigNote(
+          error.message || 'The provider rejected this API key.',
+          'error',
+          false,
+        );
+      } else {
+        this.setVerifyState('unverified');
+        this.showConfigNote(
+          'Could not verify automatically. You can still enter a model and send prompts.',
+          'info',
+          true,
+        );
+      }
+    }
+  }
+
+  private populateModelOptions(models: string[]): void {
+    if (!this.ui) {
+      return;
+    }
+    const select = this.ui.modelSelect;
+    select.replaceChildren();
+    if (!models.length) {
+      select.hidden = true;
+      return;
+    }
+    const placeholder = document.createElement('option');
+    placeholder.value = '';
+    placeholder.textContent = `Select a model (${models.length} available)`;
+    select.appendChild(placeholder);
+    for (const model of models) {
+      const option = document.createElement('option');
+      option.value = model;
+      option.textContent = model;
+      select.appendChild(option);
+    }
+    const current = this.ui.modelIdInput.value.trim();
+    select.value = models.includes(current) ? current : '';
+    select.hidden = false;
+  }
+
+  private normalizeBaseUrl(baseUrl: string): string {
+    return baseUrl.trim().replace(/\/+$/, '');
+  }
+
+  /**
+   * Whether a custom base URL is an absolute http(s) URL. Relative values (e.g.
+   * `api` or `/proxy`) would resolve against the app origin and leak the API key
+   * to the wrong endpoint, so they are rejected.
+   */
+  private isValidBaseUrl(baseUrl: string): boolean {
+    const trimmed = baseUrl.trim();
+    if (!trimmed) {
+      return false;
+    }
+    try {
+      const url = new URL(trimmed);
+      return url.protocol === 'http:' || url.protocol === 'https:';
+    } catch {
+      return false;
+    }
+  }
+
+  private async fetchProviderModels(
+    provider: GeoAgentProviderConfig,
+    apiKey: string,
+    baseUrl: string,
+    region: string,
+  ): Promise<string[]> {
+    switch (provider.id) {
+      case 'openai-responses':
+      case 'openai-chat':
+        return this.fetchOpenAiModels('https://api.openai.com/v1', apiKey);
+      case 'openai-compatible':
+        return this.fetchOpenAiModels(this.normalizeBaseUrl(baseUrl), apiKey);
+      case 'anthropic':
+        return this.fetchAnthropicModels(apiKey);
+      case 'google':
+        return this.fetchGoogleModels(apiKey);
+      case 'bedrock':
+        return this.fetchBedrockModels(apiKey, region);
+      default:
+        return [];
+    }
+  }
+
+  private async fetchModelJson(
+    url: string,
+    init: RequestInit,
+  ): Promise<unknown> {
+    const controller = new AbortController();
+    // Keep the timeout armed through body parsing: a provider that sends headers
+    // and then stalls the body must still abort within the window.
+    const timer = setTimeout(() => controller.abort(), VERIFY_TIMEOUT_MS);
+    try {
+      const response = await fetch(url, { ...init, signal: controller.signal });
+      if (response.status === 401 || response.status === 403) {
+        throw new ProviderAuthError('The provider rejected this API key.');
+      }
+      if (!response.ok) {
+        throw new Error(`Model list request failed (HTTP ${response.status}).`);
+      }
+      return await response.json();
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
+  private async fetchOpenAiModels(
+    baseUrl: string,
+    apiKey: string,
+  ): Promise<string[]> {
+    const json = (await this.fetchModelJson(`${baseUrl}/models`, {
+      headers: { Authorization: `Bearer ${apiKey}` },
+    })) as { data?: Array<{ id?: string }> };
+    return (json.data ?? [])
+      .map((entry) => entry.id)
+      .filter((id): id is string => typeof id === 'string' && id.length > 0)
+      .sort();
+  }
+
+  private async fetchAnthropicModels(apiKey: string): Promise<string[]> {
+    const json = (await this.fetchModelJson(
+      'https://api.anthropic.com/v1/models?limit=1000',
+      {
+        headers: {
+          'x-api-key': apiKey,
+          'anthropic-version': '2023-06-01',
+          'anthropic-dangerous-direct-browser-access': 'true',
+        },
+      },
+    )) as { data?: Array<{ id?: string }> };
+    return (json.data ?? [])
+      .map((entry) => entry.id)
+      .filter((id): id is string => typeof id === 'string' && id.length > 0);
+  }
+
+  private async fetchGoogleModels(apiKey: string): Promise<string[]> {
+    const url = `https://generativelanguage.googleapis.com/v1beta/models?pageSize=1000&key=${encodeURIComponent(
+      apiKey,
+    )}`;
+    const json = (await this.fetchModelJson(url, {})) as {
+      models?: Array<{ name?: string; supportedGenerationMethods?: string[] }>;
+    };
+    return (json.models ?? [])
+      .filter((entry) =>
+        (entry.supportedGenerationMethods ?? []).includes('generateContent'),
+      )
+      .map((entry) => (entry.name ?? '').replace(/^models\//, ''))
+      .filter((id) => id.length > 0)
+      .sort();
+  }
+
+  private async fetchBedrockModels(
+    apiKey: string,
+    region: string,
+  ): Promise<string[]> {
+    const host = `https://bedrock.${region || 'us-west-2'}.amazonaws.com`;
+    const json = (await this.fetchModelJson(`${host}/foundation-models`, {
+      headers: { Authorization: `Bearer ${apiKey}` },
+    })) as { modelSummaries?: Array<{ modelId?: string }> };
+    return (json.modelSummaries ?? [])
+      .map((entry) => entry.modelId)
+      .filter((id): id is string => typeof id === 'string' && id.length > 0)
+      .sort();
   }
 
   private invalidateAgent(): void {
@@ -1271,6 +1760,7 @@ export class GeoAgentControl implements IControl {
     modelId: string,
     apiKey: string,
     bedrockRegion: string,
+    baseUrl: string,
   ): Promise<Model> {
     if (providerId === 'openai-responses' || providerId === 'openai-chat') {
       const { OpenAIModel } = await import('@strands-agents/sdk/models/openai');
@@ -1280,6 +1770,18 @@ export class GeoAgentControl implements IControl {
         apiKey,
         clientConfig: {
           dangerouslyAllowBrowser: true,
+        },
+      });
+    }
+    if (providerId === 'openai-compatible') {
+      const { OpenAIModel } = await import('@strands-agents/sdk/models/openai');
+      return new OpenAIModel({
+        api: 'chat',
+        modelId,
+        apiKey,
+        clientConfig: {
+          dangerouslyAllowBrowser: true,
+          baseURL: this.normalizeBaseUrl(baseUrl),
         },
       });
     }
@@ -1316,9 +1818,10 @@ export class GeoAgentControl implements IControl {
       throw new Error('GeoAgent control is not mounted.');
     }
     const provider = this.currentProviderConfig();
-    const apiKey = this.ui.apiKeyInput.value.trim();
+    const apiKey = this.committedApiKey.trim();
     const modelId = this.ui.modelIdInput.value.trim();
     const bedrockRegion = this.ui.bedrockRegionInput.value.trim();
+    const baseUrl = this.ui.baseUrlInput.value.trim();
     if (!apiKey) {
       throw new Error(`${provider.keyLabel} is required.`);
     }
@@ -1328,11 +1831,15 @@ export class GeoAgentControl implements IControl {
     if (provider.id === 'bedrock' && !bedrockRegion) {
       throw new Error('Bedrock region is required.');
     }
+    if (provider.requiresBaseUrl && !this.isValidBaseUrl(baseUrl)) {
+      throw new Error('A valid http(s) API base URL is required.');
+    }
 
     const signature = JSON.stringify({
       providerId: provider.id,
       modelId,
       bedrockRegion: provider.id === 'bedrock' ? bedrockRegion : '',
+      baseUrl: provider.requiresBaseUrl ? baseUrl : '',
       apiKey,
       allowCodeExecution: this.state.allowCodeExecution,
     });
@@ -1343,7 +1850,13 @@ export class GeoAgentControl implements IControl {
     const systemPrompt = this.state.allowCodeExecution
       ? `${BROWSER_MAPLIBRE_SYSTEM_PROMPT}\n\n${BROWSER_MAPLIBRE_CODE_SYSTEM_PROMPT}`
       : BROWSER_MAPLIBRE_SYSTEM_PROMPT;
-    const model = await this.createProviderModel(provider.id, modelId, apiKey, bedrockRegion);
+    const model = await this.createProviderModel(
+      provider.id,
+      modelId,
+      apiKey,
+      bedrockRegion,
+      baseUrl,
+    );
     this.agent = new Agent({
       name: 'GeoAgent MapLibre Browser',
       model,

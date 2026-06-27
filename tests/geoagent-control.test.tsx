@@ -322,46 +322,298 @@ describe("GeoAgentControl", () => {
     map.cleanup();
   });
 
-  it("reports a setup status until credentials are provided", () => {
+  it("reports a setup status until credentials are provided", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ data: [{ id: "gpt-x" }, { id: "gpt-y" }] }), {
+        status: 200,
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    try {
+      const storagePrefix = "geoagent.setup";
+      sessionStorage.removeItem(`${storagePrefix}.openai-responses.api_key`);
+      const map = new MockMap();
+      const control = new GeoAgentControl({ storagePrefix });
+      const container = control.onAdd(map as never);
+      map.controlStack.appendChild(container);
+
+      const status =
+        map.mapContainer.querySelector<HTMLSpanElement>(".geoagent-status")!;
+      const sendButton =
+        map.mapContainer.querySelector<HTMLButtonElement>(".geoagent-send")!;
+      const prompt =
+        map.mapContainer.querySelector<HTMLTextAreaElement>(
+          ".geoagent-prompt",
+        )!;
+      const firstEntry = map.mapContainer.querySelector<HTMLElement>(
+        ".geoagent-entry .geoagent-text",
+      );
+
+      // No API key yet: the badge must not claim the agent is ready and the
+      // prompt must be locked.
+      expect(status.textContent).toBe("Setup required");
+      expect(status.className).toContain("setup");
+      expect(sendButton.disabled).toBe(true);
+      expect(sendButton.title).toContain("OpenAI API Key");
+      expect(prompt.disabled).toBe(true);
+      expect(firstEntry?.textContent).toContain("Add your OpenAI API Key");
+
+      // Typing a key must NOT flip the badge to ready or write to storage: the
+      // key only counts once the user commits it.
+      const apiKeyInput =
+        map.mapContainer.querySelector<HTMLInputElement>(".geoagent-api-key")!;
+      apiKeyInput.value = "sk-test";
+      apiKeyInput.dispatchEvent(new Event("input", { bubbles: true }));
+
+      expect(status.textContent).toBe("Setup required");
+      expect(status.className).not.toContain("connected");
+      expect(prompt.disabled).toBe(true);
+      expect(
+        sessionStorage.getItem(`${storagePrefix}.openai-responses.api_key`),
+      ).toBeNull();
+
+      // Committing the key (Enter) saves it and shows the confirmation note.
+      apiKeyInput.dispatchEvent(
+        new KeyboardEvent("keydown", { key: "Enter", bubbles: true }),
+      );
+      expect(
+        sessionStorage.getItem(`${storagePrefix}.openai-responses.api_key`),
+      ).toBe("sk-test");
+      const note = map.mapContainer.querySelector<HTMLElement>(
+        ".geoagent-config-note",
+      )!;
+      expect([
+        "API key saved.",
+        "Verifying connection…",
+        "Connection verified. 2 models available.",
+      ]).toContain(note.textContent);
+
+      // Verification accepts the key, flips the badge to ready, unlocks the
+      // prompt, and populates the model dropdown.
+      await vi.waitFor(() => expect(status.textContent).toBe("Ready"));
+      expect(status.className).toContain("connected");
+      expect(sendButton.title).toBe("");
+      expect(prompt.disabled).toBe(false);
+      const modelSelect = map.mapContainer.querySelector<HTMLSelectElement>(
+        ".geoagent-model-select",
+      )!;
+      expect(modelSelect.hidden).toBe(false);
+      expect(
+        Array.from(modelSelect.options).map((option) => option.value),
+      ).toEqual(["", "gpt-x", "gpt-y"]);
+
+      prompt.value = "Zoom to San Francisco";
+      prompt.dispatchEvent(new Event("input", { bubbles: true }));
+      expect(sendButton.disabled).toBe(false);
+
+      control.onRemove();
+      map.cleanup();
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("marks an invalid API key and keeps the prompt locked", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValue(new Response("nope", { status: 401 }));
+    vi.stubGlobal("fetch", fetchMock);
+    try {
+      const storagePrefix = "geoagent.invalid";
+      sessionStorage.removeItem(`${storagePrefix}.openai-responses.api_key`);
+      const map = new MockMap();
+      const control = new GeoAgentControl({ storagePrefix });
+      const container = control.onAdd(map as never);
+      map.controlStack.appendChild(container);
+
+      const apiKeyInput =
+        map.mapContainer.querySelector<HTMLInputElement>(".geoagent-api-key")!;
+      apiKeyInput.value = "sk-bad";
+      apiKeyInput.dispatchEvent(new Event("change", { bubbles: true }));
+
+      const status =
+        map.mapContainer.querySelector<HTMLSpanElement>(".geoagent-status")!;
+      await vi.waitFor(() =>
+        expect(status.textContent).toBe("Invalid API key"),
+      );
+      expect(status.className).toContain("error");
+      const prompt =
+        map.mapContainer.querySelector<HTMLTextAreaElement>(
+          ".geoagent-prompt",
+        )!;
+      expect(prompt.disabled).toBe(true);
+
+      control.onRemove();
+      map.cleanup();
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("keeps the key usable when verification cannot reach the provider", async () => {
+    const fetchMock = vi.fn().mockRejectedValue(new Error("network down"));
+    vi.stubGlobal("fetch", fetchMock);
+    try {
+      const storagePrefix = "geoagent.offline";
+      sessionStorage.removeItem(`${storagePrefix}.openai-responses.api_key`);
+      const map = new MockMap();
+      const control = new GeoAgentControl({ storagePrefix });
+      const container = control.onAdd(map as never);
+      map.controlStack.appendChild(container);
+
+      const apiKeyInput =
+        map.mapContainer.querySelector<HTMLInputElement>(".geoagent-api-key")!;
+      apiKeyInput.value = "sk-test";
+      apiKeyInput.dispatchEvent(new Event("change", { bubbles: true }));
+
+      const status =
+        map.mapContainer.querySelector<HTMLSpanElement>(".geoagent-status")!;
+      const prompt =
+        map.mapContainer.querySelector<HTMLTextAreaElement>(
+          ".geoagent-prompt",
+        )!;
+      // A network/CORS failure must not block the user: the configured key
+      // stays usable and the prompt unlocks.
+      await vi.waitFor(() => expect(prompt.disabled).toBe(false));
+      expect(status.textContent).toBe("Ready");
+
+      control.onRemove();
+      map.cleanup();
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("exposes a custom provider with an API base URL field", () => {
+    const storagePrefix = "geoagent.custom";
+    sessionStorage.removeItem(`${storagePrefix}.openai-compatible.api_key`);
+    sessionStorage.removeItem(`${storagePrefix}.baseUrl.openai-compatible`);
+    // The control also restores the selected provider and per-provider model, so
+    // clear them to keep the visibility/status assertions order-independent.
+    sessionStorage.removeItem(`${storagePrefix}.provider`);
+    sessionStorage.removeItem(`${storagePrefix}.model.openai-compatible`);
     const map = new MockMap();
-    const control = new GeoAgentControl({ storagePrefix: "geoagent.setup" });
+    const control = new GeoAgentControl({ storagePrefix });
     const container = control.onAdd(map as never);
     map.controlStack.appendChild(container);
 
+    const providerSelect =
+      map.mapContainer.querySelector<HTMLSelectElement>(".geoagent-provider")!;
+    expect(
+      Array.from(providerSelect.options).map((option) => option.value),
+    ).toContain("openai-compatible");
+
+    const baseUrlRow = map.mapContainer.querySelector<HTMLElement>(
+      ".geoagent-base-url-row",
+    )!;
+    expect(baseUrlRow.hidden).toBe(true);
+
+    providerSelect.value = "openai-compatible";
+    providerSelect.dispatchEvent(new Event("change", { bubbles: true }));
+    expect(baseUrlRow.hidden).toBe(false);
+
     const status =
       map.mapContainer.querySelector<HTMLSpanElement>(".geoagent-status")!;
-    const sendButton =
-      map.mapContainer.querySelector<HTMLButtonElement>(".geoagent-send")!;
-    const firstEntry =
-      map.mapContainer.querySelector<HTMLElement>(".geoagent-entry .geoagent-text");
-
-    // No API key yet: the badge must not claim the agent is ready.
-    expect(status.textContent).toBe("Setup required");
-    expect(status.className).toContain("setup");
-    expect(status.className).not.toContain("connected");
-    expect(sendButton.disabled).toBe(true);
-    expect(sendButton.title).toContain("OpenAI API Key");
-    expect(firstEntry?.textContent).toContain("Add your OpenAI API Key");
-
-    // Supplying the key flips the badge to a genuine ready state.
     const apiKeyInput =
       map.mapContainer.querySelector<HTMLInputElement>(".geoagent-api-key")!;
-    apiKeyInput.value = "sk-test";
-    apiKeyInput.dispatchEvent(new Event("input", { bubbles: true }));
+    const baseUrlInput = map.mapContainer.querySelector<HTMLInputElement>(
+      ".geoagent-base-url",
+    )!;
+    const modelInput =
+      map.mapContainer.querySelector<HTMLInputElement>(".geoagent-model-id")!;
 
+    // Custom provider has no default model, so it stays in setup until the base
+    // URL, key, and model are all supplied.
+    apiKeyInput.value = "token-123";
+    apiKeyInput.dispatchEvent(new Event("change", { bubbles: true }));
+    expect(status.textContent).toBe("Setup required");
+
+    // A relative base URL would resolve against the app origin and leak the key,
+    // so it must not count as configured even with a key and model present.
+    baseUrlInput.value = "/proxy";
+    baseUrlInput.dispatchEvent(new Event("input", { bubbles: true }));
+    modelInput.value = "local-model";
+    modelInput.dispatchEvent(new Event("input", { bubbles: true }));
+    expect(status.textContent).toBe("Setup required");
+
+    baseUrlInput.value = "https://llm.example.com/v1";
+    baseUrlInput.dispatchEvent(new Event("input", { bubbles: true }));
+
+    expect(control.getState()).toMatchObject({
+      providerId: "openai-compatible",
+      baseUrl: "https://llm.example.com/v1",
+      modelId: "local-model",
+    });
     expect(status.textContent).toBe("Ready");
-    expect(status.className).toContain("connected");
-    expect(status.className).not.toContain("setup");
-    expect(sendButton.title).toBe("");
-
-    const prompt =
-      map.mapContainer.querySelector<HTMLTextAreaElement>(".geoagent-prompt")!;
-    prompt.value = "Zoom to San Francisco";
-    prompt.dispatchEvent(new Event("input", { bubbles: true }));
-    expect(sendButton.disabled).toBe(false);
+    expect(
+      sessionStorage.getItem(`${storagePrefix}.baseUrl.openai-compatible`),
+    ).toBe("https://llm.example.com/v1");
 
     control.onRemove();
     map.cleanup();
+  });
+
+  it("loads models for the custom provider from its base URL", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({ data: [{ id: "local-a" }, { id: "local-b" }] }),
+        { status: 200 },
+      ),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    try {
+      const storagePrefix = "geoagent.custom.load";
+      for (const key of [
+        `${storagePrefix}.provider`,
+        `${storagePrefix}.openai-compatible.api_key`,
+        `${storagePrefix}.baseUrl.openai-compatible`,
+        `${storagePrefix}.model.openai-compatible`,
+      ]) {
+        sessionStorage.removeItem(key);
+      }
+      const map = new MockMap();
+      const control = new GeoAgentControl({
+        storagePrefix,
+        defaultProvider: "openai-compatible",
+      });
+      const container = control.onAdd(map as never);
+      map.controlStack.appendChild(container);
+
+      const baseUrlInput = map.mapContainer.querySelector<HTMLInputElement>(
+        ".geoagent-base-url",
+      )!;
+      baseUrlInput.value = "https://llm.example.com/v1/";
+      baseUrlInput.dispatchEvent(new Event("input", { bubbles: true }));
+
+      const apiKeyInput =
+        map.mapContainer.querySelector<HTMLInputElement>(".geoagent-api-key")!;
+      apiKeyInput.value = "token-xyz";
+      // Committing the key with a valid base URL present auto-verifies against
+      // the custom endpoint.
+      apiKeyInput.dispatchEvent(new Event("change", { bubbles: true }));
+
+      const modelSelect = map.mapContainer.querySelector<HTMLSelectElement>(
+        ".geoagent-model-select",
+      )!;
+      await vi.waitFor(() => expect(modelSelect.hidden).toBe(false));
+
+      // The request targets the normalized custom base URL (trailing slash
+      // trimmed) with a Bearer token.
+      expect(fetchMock).toHaveBeenCalledWith(
+        "https://llm.example.com/v1/models",
+        expect.objectContaining({
+          headers: { Authorization: "Bearer token-xyz" },
+        }),
+      );
+      expect(
+        Array.from(modelSelect.options).map((option) => option.value),
+      ).toEqual(["", "local-a", "local-b"]);
+
+      control.onRemove();
+      map.cleanup();
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 
   it("starts ready when an initial API key is provided", () => {
