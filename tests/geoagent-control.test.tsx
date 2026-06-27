@@ -488,6 +488,10 @@ describe("GeoAgentControl", () => {
     const storagePrefix = "geoagent.custom";
     sessionStorage.removeItem(`${storagePrefix}.openai-compatible.api_key`);
     sessionStorage.removeItem(`${storagePrefix}.baseUrl.openai-compatible`);
+    // The control also restores the selected provider and per-provider model, so
+    // clear them to keep the visibility/status assertions order-independent.
+    sessionStorage.removeItem(`${storagePrefix}.provider`);
+    sessionStorage.removeItem(`${storagePrefix}.model.openai-compatible`);
     const map = new MockMap();
     const control = new GeoAgentControl({ storagePrefix });
     const container = control.onAdd(map as never);
@@ -547,6 +551,69 @@ describe("GeoAgentControl", () => {
 
     control.onRemove();
     map.cleanup();
+  });
+
+  it("loads models for the custom provider from its base URL", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({ data: [{ id: "local-a" }, { id: "local-b" }] }),
+        { status: 200 },
+      ),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    try {
+      const storagePrefix = "geoagent.custom.load";
+      for (const key of [
+        `${storagePrefix}.provider`,
+        `${storagePrefix}.openai-compatible.api_key`,
+        `${storagePrefix}.baseUrl.openai-compatible`,
+        `${storagePrefix}.model.openai-compatible`,
+      ]) {
+        sessionStorage.removeItem(key);
+      }
+      const map = new MockMap();
+      const control = new GeoAgentControl({
+        storagePrefix,
+        defaultProvider: "openai-compatible",
+      });
+      const container = control.onAdd(map as never);
+      map.controlStack.appendChild(container);
+
+      const baseUrlInput = map.mapContainer.querySelector<HTMLInputElement>(
+        ".geoagent-base-url",
+      )!;
+      baseUrlInput.value = "https://llm.example.com/v1/";
+      baseUrlInput.dispatchEvent(new Event("input", { bubbles: true }));
+
+      const apiKeyInput =
+        map.mapContainer.querySelector<HTMLInputElement>(".geoagent-api-key")!;
+      apiKeyInput.value = "token-xyz";
+      // Committing the key with a valid base URL present auto-verifies against
+      // the custom endpoint.
+      apiKeyInput.dispatchEvent(new Event("change", { bubbles: true }));
+
+      const modelSelect = map.mapContainer.querySelector<HTMLSelectElement>(
+        ".geoagent-model-select",
+      )!;
+      await vi.waitFor(() => expect(modelSelect.hidden).toBe(false));
+
+      // The request targets the normalized custom base URL (trailing slash
+      // trimmed) with a Bearer token.
+      expect(fetchMock).toHaveBeenCalledWith(
+        "https://llm.example.com/v1/models",
+        expect.objectContaining({
+          headers: { Authorization: "Bearer token-xyz" },
+        }),
+      );
+      expect(
+        Array.from(modelSelect.options).map((option) => option.value),
+      ).toEqual(["", "local-a", "local-b"]);
+
+      control.onRemove();
+      map.cleanup();
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 
   it("starts ready when an initial API key is provided", () => {
