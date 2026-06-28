@@ -2,6 +2,7 @@ import {
   Agent,
   type AgentStreamEvent,
   type Model,
+  type Tool,
 } from '@strands-agents/sdk';
 import DOMPurify from 'dompurify';
 import { marked } from 'marked';
@@ -189,11 +190,18 @@ export class GeoAgentControl implements IControl {
     Omit<
       GeoAgentControlOptions,
       'defaultModel' | 'basemaps' | 'earthEngine' | 'apiKeys' | 'panelHeight'
+      | 'customTools' | 'customSystemPrompt'
     >
   > &
     Pick<
       GeoAgentControlOptions,
-      'defaultModel' | 'basemaps' | 'earthEngine' | 'apiKeys' | 'panelHeight'
+      | 'defaultModel'
+      | 'basemaps'
+      | 'earthEngine'
+      | 'apiKeys'
+      | 'panelHeight'
+      | 'customTools'
+      | 'customSystemPrompt'
     >;
   private map?: MapLibreMap;
   private mapContainer?: HTMLElement;
@@ -259,6 +267,8 @@ export class GeoAgentControl implements IControl {
       apiKeys: options.apiKeys,
       basemaps: options.basemaps,
       earthEngine: options.earthEngine,
+      customTools: options.customTools,
+      customSystemPrompt: options.customSystemPrompt,
     };
     const providerId = this.initialProviderId();
     this.state = {
@@ -1797,9 +1807,12 @@ export class GeoAgentControl implements IControl {
       return this.agent;
     }
 
-    const systemPrompt = this.state.allowCodeExecution
-      ? `${BROWSER_MAPLIBRE_SYSTEM_PROMPT}\n\n${BROWSER_MAPLIBRE_CODE_SYSTEM_PROMPT}`
-      : BROWSER_MAPLIBRE_SYSTEM_PROMPT;
+    const systemPromptParts = [
+      BROWSER_MAPLIBRE_SYSTEM_PROMPT,
+      this.state.allowCodeExecution ? BROWSER_MAPLIBRE_CODE_SYSTEM_PROMPT : '',
+      this.options.customSystemPrompt?.trim() ?? '',
+    ].filter(Boolean);
+    const systemPrompt = systemPromptParts.join('\n\n');
     const model = await this.createProviderModel(
       provider.id,
       modelId,
@@ -1811,12 +1824,20 @@ export class GeoAgentControl implements IControl {
       name: 'GeoAgent MapLibre Browser',
       model,
       systemPrompt,
-      tools: this.tools.createTools(),
+      tools: [...this.tools.createTools(), ...this.resolveCustomTools()],
       printer: false,
       toolExecutor: 'sequential',
     });
     this.agentSignature = signature;
     return this.agent;
+  }
+
+  private resolveCustomTools(): Tool[] {
+    const tools = this.options.customTools;
+    if (!tools) {
+      return [];
+    }
+    return (typeof tools === 'function' ? tools() : tools) as Tool[];
   }
 
   private appendAssistantDelta(text: string): void {

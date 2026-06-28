@@ -140,6 +140,18 @@ export interface GeoAgentControlOptions {
    * Do not provide service account private keys to this browser package.
    */
   earthEngine?: EarthEngineOptions;
+
+  /**
+   * Additional domain-specific Strands tools to expose to the agent.
+   */
+  customTools?: unknown[] | (() => unknown[]);
+
+  /**
+   * Additional system instructions appended after the built-in MapLibre
+   * instructions. Use this to teach the agent when and how to call custom
+   * tools.
+   */
+  customSystemPrompt?: string;
 }
 
 export interface GeoAgentState {
