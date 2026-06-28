@@ -276,6 +276,9 @@ export class GeoAgentControl implements IControl {
   // pair up even when several controls share a page.
   private static instanceCount = 0;
   private readonly modelListId = `geoagent-model-list-${(GeoAgentControl.instanceCount += 1)}`;
+  // Whether the agent was configured at the last control refresh, used to fold
+  // the settings section away the first time setup completes.
+  private wasConfigured = false;
 
   constructor(options: GeoAgentControlOptions = {}) {
     this.options = {
@@ -341,7 +344,8 @@ export class GeoAgentControl implements IControl {
     // agent is configured the section collapses so the chat has more room (the
     // status badge keeps showing the connection state either way).
     if (this.ui) {
-      this.ui.settingsDetails.open = !this.isConfigured();
+      this.wasConfigured = this.isConfigured();
+      this.ui.settingsDetails.open = !this.wasConfigured;
     }
     this.applyIdleStatus(true);
     this.appendLog('system', this.readyLogMessage());
@@ -1428,6 +1432,14 @@ export class GeoAgentControl implements IControl {
     this.ui.cancelButton.disabled = !this.state.busy || this.cancelRequested;
     this.ui.clearButton.disabled = this.state.busy;
     this.ui.copyButton.disabled = this.ui.log.childElementCount === 0;
+    // Fold the settings away the first time setup completes, so the chat gets
+    // more room. Only act on the not-configured -> configured edge: never
+    // auto-open, so a user who manually re-opens the section to tweak settings
+    // is not fought on the next refresh.
+    if (configured && !this.wasConfigured) {
+      this.ui.settingsDetails.open = false;
+    }
+    this.wasConfigured = configured;
     this.applyIdleStatus();
   }
 

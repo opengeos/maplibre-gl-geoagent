@@ -723,49 +723,82 @@ describe("GeoAgentControl", () => {
   });
 
   it("collapses the settings section once configured and binds the model combobox", () => {
-    // No key: setup is needed, so the settings section starts expanded.
-    const setup = new MockMap();
-    const setupControl = new GeoAgentControl({
-      storagePrefix: "geoagent.collapse.setup",
-    });
-    setup.controlStack.appendChild(setupControl.onAdd(setup as never));
+    // The auto-verify fired on key commit must not hit the network.
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(new Response("{}", { status: 200 })),
+    );
+    try {
+      // No key: setup is needed, so the settings section starts expanded.
+      sessionStorage.removeItem("geoagent.collapse.setup.openai-responses.api_key");
+      const setup = new MockMap();
+      const setupControl = new GeoAgentControl({
+        storagePrefix: "geoagent.collapse.setup",
+      });
+      setup.controlStack.appendChild(setupControl.onAdd(setup as never));
 
-    const settings = setup.mapContainer.querySelector<HTMLDetailsElement>(
-      ".geoagent-settings",
-    )!;
-    expect(settings.open).toBe(true);
+      const settings = setup.mapContainer.querySelector<HTMLDetailsElement>(
+        ".geoagent-settings",
+      )!;
+      expect(settings.open).toBe(true);
 
-    // The model field is a combobox: a single input bound to a <datalist> by id
-    // (no separate dropdown control).
-    const modelInput = setup.mapContainer.querySelector<HTMLInputElement>(
-      ".geoagent-model-id",
-    )!;
-    const modelList = setup.mapContainer.querySelector<HTMLDataListElement>(
-      ".geoagent-model-list",
-    )!;
-    expect(setup.mapContainer.querySelector(".geoagent-model-select")).toBeNull();
-    expect(modelList.id).not.toBe("");
-    expect(modelInput.getAttribute("list")).toBe(modelList.id);
+      // The model field is a combobox: a single input bound to a <datalist> by
+      // id (no separate dropdown control).
+      const modelInput = setup.mapContainer.querySelector<HTMLInputElement>(
+        ".geoagent-model-id",
+      )!;
+      const modelList = setup.mapContainer.querySelector<HTMLDataListElement>(
+        ".geoagent-model-list",
+      )!;
+      expect(
+        setup.mapContainer.querySelector(".geoagent-model-select"),
+      ).toBeNull();
+      expect(modelList.id).not.toBe("");
+      expect(modelInput.getAttribute("list")).toBe(modelList.id);
 
-    setupControl.onRemove();
-    setup.cleanup();
+      // Completing setup mid-session (committing the key, with a default model
+      // already present) folds the section away.
+      const apiKeyInput = setup.mapContainer.querySelector<HTMLInputElement>(
+        ".geoagent-api-key",
+      )!;
+      apiKeyInput.value = "sk-test";
+      apiKeyInput.dispatchEvent(new Event("change", { bubbles: true }));
+      expect(settings.open).toBe(false);
 
-    // A pre-supplied key means the agent is configured, so the section starts
-    // collapsed to leave more room for the chat.
-    const ready = new MockMap();
-    const readyControl = new GeoAgentControl({
-      storagePrefix: "geoagent.collapse.ready",
-      apiKeys: { "openai-responses": "sk-test" },
-    });
-    ready.controlStack.appendChild(readyControl.onAdd(ready as never));
+      // Manually re-opening it must survive an unrelated refresh (typing a
+      // prompt) — the collapse only fires on the not-configured -> configured
+      // edge, never on every update.
+      settings.open = true;
+      const prompt = setup.mapContainer.querySelector<HTMLTextAreaElement>(
+        ".geoagent-prompt",
+      )!;
+      prompt.value = "hello";
+      prompt.dispatchEvent(new Event("input", { bubbles: true }));
+      expect(settings.open).toBe(true);
 
-    expect(
-      ready.mapContainer.querySelector<HTMLDetailsElement>(".geoagent-settings")!
-        .open,
-    ).toBe(false);
+      setupControl.onRemove();
+      setup.cleanup();
 
-    readyControl.onRemove();
-    ready.cleanup();
+      // A pre-supplied key means the agent is configured, so the section starts
+      // collapsed to leave more room for the chat.
+      const ready = new MockMap();
+      const readyControl = new GeoAgentControl({
+        storagePrefix: "geoagent.collapse.ready",
+        apiKeys: { "openai-responses": "sk-test" },
+      });
+      ready.controlStack.appendChild(readyControl.onAdd(ready as never));
+
+      expect(
+        ready.mapContainer.querySelector<HTMLDetailsElement>(
+          ".geoagent-settings",
+        )!.open,
+      ).toBe(false);
+
+      readyControl.onRemove();
+      ready.cleanup();
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 
   it("starts ready when an initial API key is provided", () => {
