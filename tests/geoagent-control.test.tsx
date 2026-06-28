@@ -757,13 +757,19 @@ describe("GeoAgentControl", () => {
       expect(modelInput.getAttribute("list")).toBe(modelList.id);
 
       // Completing setup mid-session (committing the key, with a default model
-      // already present) folds the section away.
+      // already present) folds the section away. The key field is focused at
+      // commit time (as it is for a real paste + Enter); it must be blurred
+      // before the section hides it, since synchronously hiding a focused
+      // password field has hung some WebKit builds.
       const apiKeyInput = setup.mapContainer.querySelector<HTMLInputElement>(
         ".geoagent-api-key",
       )!;
+      apiKeyInput.focus();
+      expect(document.activeElement).toBe(apiKeyInput);
       apiKeyInput.value = "sk-test";
       apiKeyInput.dispatchEvent(new Event("change", { bubbles: true }));
       expect(settings.open).toBe(false);
+      expect(document.activeElement).not.toBe(apiKeyInput);
 
       // Manually re-opening it must survive an unrelated refresh (typing a
       // prompt) — the collapse only fires on the not-configured -> configured

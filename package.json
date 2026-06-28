@@ -1,6 +1,6 @@
 {
   "name": "maplibre-gl-geoagent",
-  "version": "0.5.1",
+  "version": "0.5.2",
   "description": "A browser-only GeoAgent MapLibre GL JS control with Strands agent tools",
   "type": "module",
   "main": "./dist/index.cjs",

@@ -279,6 +279,9 @@ export class GeoAgentControl implements IControl {
   // Whether the agent was configured at the last control refresh, used to fold
   // the settings section away the first time setup completes.
   private wasConfigured = false;
+  // True while commitApiKey() runs, so the blur it triggers (when the section
+  // collapses) cannot re-enter the commit through the field's `change` event.
+  private committingApiKey = false;
 
   constructor(options: GeoAgentControlOptions = {}) {
     this.options = {
@@ -1437,10 +1440,32 @@ export class GeoAgentControl implements IControl {
     // auto-open, so a user who manually re-opens the section to tweak settings
     // is not fought on the next refresh.
     if (configured && !this.wasConfigured) {
-      this.ui.settingsDetails.open = false;
+      this.collapseSettings();
     }
     this.wasConfigured = configured;
     this.applyIdleStatus();
+  }
+
+  /**
+   * Collapse the settings section. Any focused field inside it is blurred first:
+   * this edge typically fires while the user is committing the API key with the
+   * password input focused, and synchronously hiding a focused
+   * `type="password"` field has hung some WebKit/Safari builds (the password
+   * autofill machinery). Blurring first means the section only ever hides
+   * already-unfocused fields.
+   */
+  private collapseSettings(): void {
+    if (!this.ui) {
+      return;
+    }
+    const active = document.activeElement;
+    if (
+      active instanceof HTMLElement &&
+      this.ui.settingsDetails.contains(active)
+    ) {
+      active.blur();
+    }
+    this.ui.settingsDetails.open = false;
   }
 
   /** Placeholder hint shown in the prompt field while it is locked. */
@@ -1493,29 +1518,37 @@ export class GeoAgentControl implements IControl {
    * key was entered) verify it against the provider in the background.
    */
   private commitApiKey(): void {
-    if (!this.ui) {
+    if (!this.ui || this.committingApiKey) {
+      // Guard against re-entry: collapsing the settings on the configured edge
+      // blurs the key field, whose `change` event would otherwise call this
+      // again mid-commit.
       return;
     }
-    const apiKey = this.ui.apiKeyInput.value.trim();
-    const changed = apiKey !== this.committedApiKey;
-    this.committedApiKey = apiKey;
-    const storageKey = this.currentProviderConfig().storageKey;
-    if (apiKey) {
-      storageSet(storageKey, apiKey);
-    } else {
-      storageRemove(storageKey);
-    }
-    this.invalidateAgent();
-    this.resetVerification();
-    if (apiKey) {
-      this.showConfigNote('API key saved.', 'success', true);
-    } else {
-      this.hideConfigNote();
-    }
-    this.applyIdleStatus(true);
-    this.updateControls();
-    if (apiKey && changed && this.canVerify()) {
-      void this.verifyAndLoadModels();
+    this.committingApiKey = true;
+    try {
+      const apiKey = this.ui.apiKeyInput.value.trim();
+      const changed = apiKey !== this.committedApiKey;
+      this.committedApiKey = apiKey;
+      const storageKey = this.currentProviderConfig().storageKey;
+      if (apiKey) {
+        storageSet(storageKey, apiKey);
+      } else {
+        storageRemove(storageKey);
+      }
+      this.invalidateAgent();
+      this.resetVerification();
+      if (apiKey) {
+        this.showConfigNote('API key saved.', 'success', true);
+      } else {
+        this.hideConfigNote();
+      }
+      this.applyIdleStatus(true);
+      this.updateControls();
+      if (apiKey && changed && this.canVerify()) {
+        void this.verifyAndLoadModels();
+      }
+    } finally {
+      this.committingApiKey = false;
     }
   }
 
