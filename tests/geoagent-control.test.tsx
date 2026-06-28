@@ -394,13 +394,12 @@ describe("GeoAgentControl", () => {
       expect(status.className).toContain("connected");
       expect(sendButton.title).toBe("");
       expect(prompt.disabled).toBe(false);
-      const modelSelect = map.mapContainer.querySelector<HTMLSelectElement>(
-        ".geoagent-model-select",
+      const modelList = map.mapContainer.querySelector<HTMLDataListElement>(
+        ".geoagent-model-list",
       )!;
-      expect(modelSelect.hidden).toBe(false);
       expect(
-        Array.from(modelSelect.options).map((option) => option.value),
-      ).toEqual(["", "gpt-x", "gpt-y"]);
+        Array.from(modelList.options).map((option) => option.value),
+      ).toEqual(["gpt-x", "gpt-y"]);
 
       prompt.value = "Zoom to San Francisco";
       prompt.dispatchEvent(new Event("input", { bubbles: true }));
@@ -592,10 +591,10 @@ describe("GeoAgentControl", () => {
       // the custom endpoint.
       apiKeyInput.dispatchEvent(new Event("change", { bubbles: true }));
 
-      const modelSelect = map.mapContainer.querySelector<HTMLSelectElement>(
-        ".geoagent-model-select",
+      const modelList = map.mapContainer.querySelector<HTMLDataListElement>(
+        ".geoagent-model-list",
       )!;
-      await vi.waitFor(() => expect(modelSelect.hidden).toBe(false));
+      await vi.waitFor(() => expect(modelList.options.length).toBe(2));
 
       // The request targets the normalized custom base URL (trailing slash
       // trimmed) with a Bearer token.
@@ -606,14 +605,60 @@ describe("GeoAgentControl", () => {
         }),
       );
       expect(
-        Array.from(modelSelect.options).map((option) => option.value),
-      ).toEqual(["", "local-a", "local-b"]);
+        Array.from(modelList.options).map((option) => option.value),
+      ).toEqual(["local-a", "local-b"]);
 
       control.onRemove();
       map.cleanup();
     } finally {
       vi.unstubAllGlobals();
     }
+  });
+
+  it("collapses the settings section once configured and binds the model combobox", () => {
+    // No key: setup is needed, so the settings section starts expanded.
+    const setup = new MockMap();
+    const setupControl = new GeoAgentControl({
+      storagePrefix: "geoagent.collapse.setup",
+    });
+    setup.controlStack.appendChild(setupControl.onAdd(setup as never));
+
+    const settings = setup.mapContainer.querySelector<HTMLDetailsElement>(
+      ".geoagent-settings",
+    )!;
+    expect(settings.open).toBe(true);
+
+    // The model field is a combobox: a single input bound to a <datalist> by id
+    // (no separate dropdown control).
+    const modelInput = setup.mapContainer.querySelector<HTMLInputElement>(
+      ".geoagent-model-id",
+    )!;
+    const modelList = setup.mapContainer.querySelector<HTMLDataListElement>(
+      ".geoagent-model-list",
+    )!;
+    expect(setup.mapContainer.querySelector(".geoagent-model-select")).toBeNull();
+    expect(modelList.id).not.toBe("");
+    expect(modelInput.getAttribute("list")).toBe(modelList.id);
+
+    setupControl.onRemove();
+    setup.cleanup();
+
+    // A pre-supplied key means the agent is configured, so the section starts
+    // collapsed to leave more room for the chat.
+    const ready = new MockMap();
+    const readyControl = new GeoAgentControl({
+      storagePrefix: "geoagent.collapse.ready",
+      apiKeys: { "openai-responses": "sk-test" },
+    });
+    ready.controlStack.appendChild(readyControl.onAdd(ready as never));
+
+    expect(
+      ready.mapContainer.querySelector<HTMLDetailsElement>(".geoagent-settings")!
+        .open,
+    ).toBe(false);
+
+    readyControl.onRemove();
+    ready.cleanup();
   });
 
   it("starts ready when an initial API key is provided", () => {

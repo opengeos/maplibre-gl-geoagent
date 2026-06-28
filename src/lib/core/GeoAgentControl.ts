@@ -125,13 +125,14 @@ When no dedicated browser map tool can perform the requested MapLibre operation,
 
 interface GeoAgentUi {
   status: HTMLSpanElement;
+  settingsDetails: HTMLDetailsElement;
   providerSelect: HTMLSelectElement;
   apiKeyLabel: HTMLSpanElement;
   apiKeyInput: HTMLInputElement;
   baseUrlLabel: HTMLLabelElement;
   baseUrlInput: HTMLInputElement;
   modelIdInput: HTMLInputElement;
-  modelSelect: HTMLSelectElement;
+  modelList: HTMLDataListElement;
   loadModelsButton: HTMLButtonElement;
   configNote: HTMLDivElement;
   bedrockRegionLabel: HTMLLabelElement;
@@ -245,6 +246,10 @@ export class GeoAgentControl implements IControl {
   // result over a newer key/provider.
   private verifyToken = 0;
   private configNoteTimer: ReturnType<typeof setTimeout> | null = null;
+  // Unique per control instance so the model <input list> and its <datalist>
+  // pair up even when several controls share a page.
+  private static instanceCount = 0;
+  private readonly modelListId = `geoagent-model-list-${(GeoAgentControl.instanceCount += 1)}`;
 
   constructor(options: GeoAgentControlOptions = {}) {
     this.options = {
@@ -306,6 +311,12 @@ export class GeoAgentControl implements IControl {
     });
     this.setupEventListeners();
     this.loadProviderSettings();
+    // Start the settings expanded only when setup is still needed; once the
+    // agent is configured the section collapses so the chat has more room (the
+    // status badge keeps showing the connection state either way).
+    if (this.ui) {
+      this.ui.settingsDetails.open = !this.isConfigured();
+    }
     this.applyIdleStatus(true);
     this.appendLog('system', this.readyLogMessage());
     this.updateControls();
@@ -582,33 +593,36 @@ export class GeoAgentControl implements IControl {
     const content = document.createElement('div');
     content.className = 'geoagent-panel-content';
     content.innerHTML = `
-      <div class="geoagent-settings-grid">
-        <label>
-          Provider
-          <select class="geoagent-provider"></select>
-        </label>
-        <label>
-          <span class="geoagent-api-key-label">API Key</span>
-          <input class="geoagent-api-key" type="password" autocomplete="off" placeholder="sk-..." />
-        </label>
-        <label class="geoagent-base-url-row" hidden>
-          API Base URL
-          <input class="geoagent-base-url" autocomplete="off" placeholder="https://host/v1" />
-        </label>
-        <label class="geoagent-bedrock-region-row" hidden>
-          Region
-          <input class="geoagent-bedrock-region" autocomplete="off" placeholder="us-west-2" />
-        </label>
-        <label class="geoagent-model-cell">
-          Model
-          <div class="geoagent-model-row">
-            <input class="geoagent-model-id" />
-            <button class="geoagent-load-models secondary" type="button">Load models</button>
-          </div>
-          <select class="geoagent-model-select" aria-label="Available models" hidden></select>
-        </label>
-        <div class="geoagent-config-note" aria-live="polite" hidden></div>
-      </div>
+      <details class="geoagent-settings">
+        <summary>Provider &amp; model</summary>
+        <div class="geoagent-settings-grid">
+          <label>
+            Provider
+            <select class="geoagent-provider"></select>
+          </label>
+          <label>
+            <span class="geoagent-api-key-label">API Key</span>
+            <input class="geoagent-api-key" type="password" autocomplete="off" placeholder="sk-..." />
+          </label>
+          <label class="geoagent-base-url-row" hidden>
+            API Base URL
+            <input class="geoagent-base-url" autocomplete="off" placeholder="https://host/v1" />
+          </label>
+          <label class="geoagent-bedrock-region-row" hidden>
+            Region
+            <input class="geoagent-bedrock-region" autocomplete="off" placeholder="us-west-2" />
+          </label>
+          <label class="geoagent-model-cell">
+            Model
+            <div class="geoagent-model-row">
+              <input class="geoagent-model-id" list="${this.modelListId}" autocomplete="off" />
+              <button class="geoagent-load-models secondary" type="button">Load models</button>
+            </div>
+            <datalist class="geoagent-model-list" id="${this.modelListId}"></datalist>
+          </label>
+          <div class="geoagent-config-note" aria-live="polite" hidden></div>
+        </div>
+      </details>
 
       <details class="geoagent-earth-engine">
         <summary>Earth Engine</summary>
@@ -655,13 +669,14 @@ export class GeoAgentControl implements IControl {
     panel.append(header, content, resizeHandleLeft, resizeHandleRight);
     this.ui = {
       status,
+      settingsDetails: this.requiredElement(content, '.geoagent-settings'),
       providerSelect: this.requiredElement(content, '.geoagent-provider'),
       apiKeyLabel: this.requiredElement(content, '.geoagent-api-key-label'),
       apiKeyInput: this.requiredElement(content, '.geoagent-api-key'),
       baseUrlLabel: this.requiredElement(content, '.geoagent-base-url-row'),
       baseUrlInput: this.requiredElement(content, '.geoagent-base-url'),
       modelIdInput: this.requiredElement(content, '.geoagent-model-id'),
-      modelSelect: this.requiredElement(content, '.geoagent-model-select'),
+      modelList: this.requiredElement(content, '.geoagent-model-list'),
       loadModelsButton: this.requiredElement(content, '.geoagent-load-models'),
       configNote: this.requiredElement(content, '.geoagent-config-note'),
       bedrockRegionLabel: this.requiredElement(content, '.geoagent-bedrock-region-row'),
@@ -835,14 +850,9 @@ export class GeoAgentControl implements IControl {
     ui.loadModelsButton.addEventListener('click', () => {
       void this.verifyAndLoadModels();
     });
-    ui.modelSelect.addEventListener('change', () => {
-      const modelId = ui.modelSelect.value;
-      if (!modelId) {
-        return;
-      }
-      ui.modelIdInput.value = modelId;
-      ui.modelIdInput.dispatchEvent(new Event('input', { bubbles: true }));
-    });
+    // The model field is a combobox: typing or picking a loaded model from the
+    // attached <datalist> both fire this `input` handler, so no separate
+    // dropdown listener is needed.
     ui.modelIdInput.addEventListener('input', () => {
       const modelId = ui.modelIdInput.value.trim();
       this.state.modelId = modelId;
@@ -1591,25 +1601,16 @@ export class GeoAgentControl implements IControl {
     if (!this.ui) {
       return;
     }
-    const select = this.ui.modelSelect;
-    select.replaceChildren();
-    if (!models.length) {
-      select.hidden = true;
-      return;
-    }
-    const placeholder = document.createElement('option');
-    placeholder.value = '';
-    placeholder.textContent = `Select a model (${models.length} available)`;
-    select.appendChild(placeholder);
+    // Loaded models become suggestions on the model field's attached <datalist>,
+    // so the single combobox input offers a dropdown while still accepting any
+    // typed value (custom endpoints, models the list misses).
+    const list = this.ui.modelList;
+    list.replaceChildren();
     for (const model of models) {
       const option = document.createElement('option');
       option.value = model;
-      option.textContent = model;
-      select.appendChild(option);
+      list.appendChild(option);
     }
-    const current = this.ui.modelIdInput.value.trim();
-    select.value = models.includes(current) ? current : '';
-    select.hidden = false;
   }
 
   private normalizeBaseUrl(baseUrl: string): string {

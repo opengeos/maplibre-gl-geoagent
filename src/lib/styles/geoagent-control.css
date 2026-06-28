@@ -217,7 +217,7 @@ body.geoagent-panel-resizing {
 /* Settings, Earth Engine, toggles and the prompt form keep their natural size;
    only the conversation log flexes to fill (and scrolls) so the form and its
    action buttons stay visible instead of being pushed past the panel. */
-.geoagent-settings-grid,
+.geoagent-settings,
 .geoagent-earth-engine,
 .geoagent-toggle-row,
 .geoagent-form {
@@ -268,11 +268,26 @@ body.geoagent-panel-resizing {
   line-height: 1.35;
 }
 
+.geoagent-settings {
+  border: 1px solid #d7dde5;
+  border-radius: 6px;
+  background: #f8fafc;
+}
+
+.geoagent-settings > summary {
+  padding: 8px 10px;
+  color: #17202a;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
 .geoagent-settings-grid {
   display: grid;
   grid-template-columns: 1fr minmax(110px, 0.55fr);
   gap: 8px;
   align-items: end;
+  padding: 0 10px 10px;
 }
 
 /* The model cell, optional base URL / region rows, and the inline config note
@@ -308,14 +323,6 @@ body.geoagent-panel-resizing {
   min-height: 36px;
   padding: 0 12px;
   white-space: nowrap;
-}
-
-.geoagent-model-select {
-  margin-top: 6px;
-}
-
-.geoagent-model-select[hidden] {
-  display: none;
 }
 
 .geoagent-config-note {
