@@ -25,61 +25,14 @@ const DEFAULT_STORAGE_PREFIX = 'geoagent.maplibre';
 const DEFAULT_PROMPT_PLACEHOLDER =
   'Add a red marker for San Francisco and zoom to it.';
 
-// How long the API key list/verification request may run before it is treated
-// as "could not verify" so the UI never hangs on a stalled provider endpoint.
-const VERIFY_TIMEOUT_MS = 15000;
-
 // Status badge labels that represent an idle (not mid-run) state. The idle
 // status is recomputed from the current configuration, so it may flip between
-// these as the user fills in or clears credentials. Transient statuses
-// (Running, Cancelled, Error, Copied, Verifying, Invalid API key) are
-// intentionally excluded so they are not clobbered by configuration changes.
+// these as the user fills in or clears credentials. Transient statuses (Running,
+// Cancelled, Error, Copied) are intentionally excluded so they are not clobbered
+// by configuration changes.
 const STATUS_READY = 'Ready';
 const STATUS_SETUP = 'Setup required';
-const STATUS_VERIFYING = 'Verifying…';
-const STATUS_INVALID = 'Invalid API key';
 const IDLE_STATUS_LABELS = new Set<string>([STATUS_READY, STATUS_SETUP]);
-
-// Tracks whether the committed credentials for the current provider have been
-// checked against the provider's API.
-//   idle       no check has run for the current key
-//   verifying  a check is in flight
-//   ok         the provider accepted the key (models were listed)
-//   invalid    the provider rejected the key (HTTP 401/403)
-//   unverified the check could not complete (network/CORS/unsupported) — the
-//              key is not known to be bad, so the prompt is not blocked
-type VerifyState = 'idle' | 'verifying' | 'ok' | 'invalid' | 'unverified';
-
-// Marks a model-list failure as an authentication problem (a bad key) so it can
-// be distinguished from a network/CORS/unsupported failure that must not block
-// the user.
-class ProviderAuthError extends Error {}
-
-// Substrings that mark a model from an OpenAI-shaped /models endpoint as
-// something other than a text chat model (embeddings, speech/audio, image
-// generation, moderation/guard, rerankers). None of these can drive the chat
-// agent on any OpenAI-compatible endpoint, so they are dropped from the model
-// picker. There is no "deprecated" flag in these APIs, so deprecated *chat*
-// snapshots cannot be detected and are intentionally left in.
-const NON_CHAT_MODEL_MARKERS = [
-  'embed',
-  'whisper',
-  'tts',
-  'text-to-speech',
-  'transcribe',
-  'realtime',
-  'moderation',
-  'dall-e',
-  'gpt-image',
-  'rerank',
-  'guard',
-];
-
-// Legacy OpenAI completion families the chat/responses agent cannot drive. Only
-// applied to first-party OpenAI: a custom endpoint may legitimately name a chat
-// model "...-instruct" (e.g. a local Llama Instruct build), so the markers must
-// not be applied there.
-const OPENAI_LEGACY_MODEL_MARKERS = ['davinci', 'babbage', 'curie'];
 
 const BASE_PROVIDER_CONFIGS: Record<
   GeoAgentProviderId,
@@ -104,21 +57,21 @@ const BASE_PROVIDER_CONFIGS: Record<
     label: 'Anthropic',
     keyLabel: 'Anthropic API Key',
     keyPlaceholder: 'sk-ant-...',
-    defaultModel: 'claude-sonnet-4-6',
+    defaultModel: 'claude-opus-4-8',
   },
   google: {
     id: 'google',
     label: 'Google Gemini',
     keyLabel: 'Gemini API Key',
     keyPlaceholder: 'AIza...',
-    defaultModel: 'gemini-3.1-pro-preview',
+    defaultModel: 'gemini-3.5-flash',
   },
   bedrock: {
     id: 'bedrock',
     label: 'Amazon Bedrock',
     keyLabel: 'Bedrock API Key',
     keyPlaceholder: 'bedrock-api-key...',
-    defaultModel: 'global.anthropic.claude-sonnet-4-6',
+    defaultModel: 'anthropic.claude-opus-4-8',
     defaultRegion: 'us-west-2',
   },
   'openai-compatible': {
@@ -267,10 +220,6 @@ export class GeoAgentControl implements IControl {
   // key field (Enter or blur), never on every keystroke, so a half-typed key
   // does not flip the badge to "Ready" or get written to storage.
   private committedApiKey = '';
-  private verifyState: VerifyState = 'idle';
-  // Incremented on every verification so a slow earlier request cannot apply its
-  // result over a newer key/provider.
-  private verifyToken = 0;
   private configNoteTimer: ReturnType<typeof setTimeout> | null = null;
   // Unique per control instance so the model input's aria-controls points at its
   // own suggestion list even when several controls share a page.
@@ -386,7 +335,6 @@ export class GeoAgentControl implements IControl {
       clearTimeout(this.suggestionBlurTimer);
       this.suggestionBlurTimer = null;
     }
-    this.verifyToken++;
     this.activeAbortController?.abort();
     this.agent?.cancel();
     this.activeAbortController = null;
@@ -659,7 +607,7 @@ export class GeoAgentControl implements IControl {
             Model
             <div class="geoagent-model-row">
               <input class="geoagent-model-id" autocomplete="off" role="combobox" aria-autocomplete="list" aria-expanded="false" aria-controls="${this.modelListId}" />
-              <button class="geoagent-load-models secondary" type="button">Load models</button>
+              <button class="geoagent-load-models secondary" type="button">Use latest</button>
             </div>
             <ul class="geoagent-model-suggestions" id="${this.modelListId}" role="listbox" hidden></ul>
           </label>
@@ -857,8 +805,7 @@ export class GeoAgentControl implements IControl {
       this.state.modelId = this.initialModelId(providerId);
       this.loadProviderSettings();
       this.invalidateAgent();
-      // resetVerification() also clears the loaded model list.
-      this.resetVerification();
+      this.resetModelOptions();
       this.hideConfigNote();
       this.applyIdleStatus(true);
       this.updateControls();
@@ -885,13 +832,11 @@ export class GeoAgentControl implements IControl {
         storageRemove(this.baseUrlStorageKey(this.state.providerId));
       }
       this.invalidateAgent();
-      // A different endpoint invalidates a prior verification result.
-      this.resetVerification();
       this.updateControls();
       this.emit('statechange');
     });
     ui.loadModelsButton.addEventListener('click', () => {
-      void this.verifyAndLoadModels();
+      this.useLatestModel();
     });
     // The model field is a combobox backed by a custom suggestion dropdown
     // (geoagent-model-suggestions), not a native <datalist>: opening Chrome's
@@ -1440,13 +1385,9 @@ export class GeoAgentControl implements IControl {
       return;
     }
     const configured = this.isConfigured();
-    // The prompt and Send button stay locked until the agent is configured, the
-    // key is not known to be invalid, and no verification is in flight, so the
-    // user cannot draft or send a message that has nowhere to go.
-    const blocked =
-      !configured ||
-      this.verifyState === 'invalid' ||
-      this.verifyState === 'verifying';
+    // The prompt and Send button stay locked until the agent is configured, so
+    // the user cannot draft or send a message that has nowhere to go.
+    const blocked = !configured;
     this.ui.prompt.disabled = this.state.busy || blocked;
     this.ui.prompt.placeholder = blocked
       ? this.blockedPromptHint(configured)
@@ -1455,10 +1396,6 @@ export class GeoAgentControl implements IControl {
       this.state.busy || !this.ui.prompt.value.trim() || blocked;
     if (!blocked) {
       this.ui.sendButton.removeAttribute('title');
-    } else if (this.verifyState === 'invalid') {
-      this.ui.sendButton.title = 'Fix the API key to send a prompt.';
-    } else if (this.verifyState === 'verifying') {
-      this.ui.sendButton.title = 'Verifying the connection…';
     } else {
       const missing = this.missingConfigSummary();
       this.ui.sendButton.title = missing
@@ -1466,7 +1403,7 @@ export class GeoAgentControl implements IControl {
         : 'Configuration required to send a prompt.';
     }
     this.ui.loadModelsButton.disabled =
-      this.state.busy || this.verifyState === 'verifying' || !this.canVerify();
+      this.state.busy || !this.currentProviderConfig().defaultModel;
     this.ui.cancelButton.disabled = !this.state.busy || this.cancelRequested;
     this.ui.clearButton.disabled = this.state.busy;
     this.ui.copyButton.disabled = this.ui.log.childElementCount === 0;
@@ -1483,33 +1420,10 @@ export class GeoAgentControl implements IControl {
 
   /** Placeholder hint shown in the prompt field while it is locked. */
   private blockedPromptHint(configured: boolean): string {
-    if (this.verifyState === 'verifying') {
-      return 'Verifying the connection…';
-    }
-    if (this.verifyState === 'invalid') {
-      return 'The API key was rejected. Fix it to start.';
-    }
     const missing = configured ? '' : this.missingConfigSummary();
     return missing
       ? `Add your ${missing} to start.`
       : 'Configure a provider to start.';
-  }
-
-  /**
-   * Whether there is enough committed configuration to attempt a live
-   * verification / model-list request for the current provider.
-   */
-  private canVerify(): boolean {
-    if (!this.ui || !this.committedApiKey.trim()) {
-      return false;
-    }
-    if (
-      this.currentProviderConfig().requiresBaseUrl &&
-      !this.isValidBaseUrl(this.ui.baseUrlInput.value)
-    ) {
-      return false;
-    }
-    return true;
   }
 
   /** React to an in-progress edit of the API key without committing it. */
@@ -1526,16 +1440,12 @@ export class GeoAgentControl implements IControl {
     this.updateControls();
   }
 
-  /**
-   * Persist the typed API key, refresh the connection state, and (when a usable
-   * key was entered) verify it against the provider in the background.
-   */
+  /** Persist the typed API key and refresh the local connection state. */
   private commitApiKey(): void {
     if (!this.ui) {
       return;
     }
     const apiKey = this.ui.apiKeyInput.value.trim();
-    const changed = apiKey !== this.committedApiKey;
     this.committedApiKey = apiKey;
     const storageKey = this.currentProviderConfig().storageKey;
     if (apiKey) {
@@ -1544,7 +1454,6 @@ export class GeoAgentControl implements IControl {
       storageRemove(storageKey);
     }
     this.invalidateAgent();
-    this.resetVerification();
     if (apiKey) {
       this.showConfigNote('API key saved.', 'success', true);
     } else {
@@ -1552,35 +1461,10 @@ export class GeoAgentControl implements IControl {
     }
     this.applyIdleStatus(true);
     this.updateControls();
-    if (apiKey && changed && this.canVerify()) {
-      void this.verifyAndLoadModels();
-    }
   }
 
-  /** Clear any verification result so the connection state is re-evaluated. */
-  private resetVerification(): void {
-    // Bump the token so an in-flight request cannot apply a stale result.
-    this.verifyToken++;
-    this.verifyState = 'idle';
-    // Drop the model list loaded for the previous key/endpoint so the user
-    // cannot pick a model that belongs to different credentials.
+  private resetModelOptions(): void {
     this.populateModelOptions([]);
-  }
-
-  private setVerifyState(state: VerifyState): void {
-    this.verifyState = state;
-    if (!this.ui || this.state.busy) {
-      this.updateControls();
-      return;
-    }
-    if (state === 'verifying') {
-      this.setStatus(STATUS_VERIFYING, 'connecting');
-    } else if (state === 'invalid') {
-      this.setStatus(STATUS_INVALID, 'error');
-    } else {
-      this.applyIdleStatus(true);
-    }
-    this.updateControls();
   }
 
   private showConfigNote(
@@ -1614,72 +1498,41 @@ export class GeoAgentControl implements IControl {
     }
   }
 
-  /**
-   * Ask the current provider for its model list. A success both verifies the
-   * key and populates the model dropdown; an authentication failure marks the
-   * key invalid; any other failure (network/CORS/unsupported) leaves the key
-   * usable but unverified so the user is never blocked by a provider that does
-   * not allow browser model listing.
-   */
-  private async verifyAndLoadModels(): Promise<void> {
-    if (!this.ui || !this.canVerify()) {
+  private useLatestModel(): void {
+    if (!this.ui) {
       return;
     }
-    const provider = this.currentProviderConfig();
-    const apiKey = this.committedApiKey.trim();
-    const baseUrl = this.ui.baseUrlInput.value.trim();
-    const region = this.ui.bedrockRegionInput.value.trim();
-    const token = ++this.verifyToken;
-    this.setVerifyState('verifying');
-    this.showConfigNote('Verifying connection…', 'info', false);
-    try {
-      const models = await this.fetchProviderModels(
-        provider,
-        apiKey,
-        baseUrl,
-        region,
-      );
-      if (token !== this.verifyToken) {
-        return;
-      }
-      this.populateModelOptions(models);
-      this.setVerifyState('ok');
+    const latestModel = this.currentProviderConfig().defaultModel;
+    if (!latestModel) {
       this.showConfigNote(
-        models.length
-          ? `Connection verified. ${models.length} models available.`
-          : 'Connection verified.',
-        'success',
+        'Enter the model ID for this custom endpoint.',
+        'info',
         true,
       );
-    } catch (error) {
-      if (token !== this.verifyToken) {
-        return;
-      }
-      if (error instanceof ProviderAuthError) {
-        this.setVerifyState('invalid');
-        this.showConfigNote(
-          error.message || 'The provider rejected this API key.',
-          'error',
-          false,
-        );
-      } else {
-        this.setVerifyState('unverified');
-        this.showConfigNote(
-          'Could not verify automatically. You can still enter a model and send prompts.',
-          'info',
-          true,
-        );
-      }
+      return;
     }
+    this.ui.modelIdInput.value = latestModel;
+    this.ui.modelIdInput.dispatchEvent(new Event('input', { bubbles: true }));
+    this.closeModelSuggestions();
+    this.showConfigNote(`Using latest model: ${latestModel}.`, 'success', true);
   }
 
-  // Cap on rendered suggestion rows. The dropdown filters as the user types, so
-  // this only bounds the initial/unfiltered view and keeps a pathological model
-  // list (thousands of fine-tunes) from building a huge DOM list.
   private static readonly MAX_SUGGESTIONS = 100;
 
   private populateModelOptions(models: string[]): void {
-    this.modelOptions = models;
+    const seen = new Set<string>();
+    const options: string[] = [];
+    for (const rawModel of models) {
+      const model = rawModel.trim();
+      if (!model || seen.has(model)) {
+        continue;
+      }
+      seen.add(model);
+      if (options.length < GeoAgentControl.MAX_SUGGESTIONS) {
+        options.push(model);
+      }
+    }
+    this.modelOptions = options;
     // Refresh the dropdown if it is open (e.g. the list just loaded while the
     // field is focused); otherwise leave it closed. Show the full list rather
     // than filtering by the default model already in the field.
@@ -1701,8 +1554,8 @@ export class GeoAgentControl implements IControl {
   /**
    * Open (or refresh) the custom model suggestion dropdown. With `useFilter`
    * (typing) the list narrows to the current input value; without it (focus,
-   * arrow keys) the full loaded list is shown so the user can browse even when
-   * the field already holds the default model.
+   * arrow keys) the full local suggestion list is shown so the user can browse
+   * even when the field already holds the default model.
    */
   private openModelSuggestions(useFilter = true): void {
     if (!this.ui) {
@@ -1833,143 +1686,6 @@ export class GeoAgentControl implements IControl {
     } catch {
       return false;
     }
-  }
-
-  private async fetchProviderModels(
-    provider: GeoAgentProviderConfig,
-    apiKey: string,
-    baseUrl: string,
-    region: string,
-  ): Promise<string[]> {
-    switch (provider.id) {
-      case 'openai-responses':
-      case 'openai-chat':
-        return this.fetchOpenAiModels('https://api.openai.com/v1', apiKey, true);
-      case 'openai-compatible':
-        return this.fetchOpenAiModels(
-          this.normalizeBaseUrl(baseUrl),
-          apiKey,
-          false,
-        );
-      case 'anthropic':
-        return this.fetchAnthropicModels(apiKey);
-      case 'google':
-        return this.fetchGoogleModels(apiKey);
-      case 'bedrock':
-        return this.fetchBedrockModels(apiKey, region);
-      default:
-        return [];
-    }
-  }
-
-  private async fetchModelJson(
-    url: string,
-    init: RequestInit,
-  ): Promise<unknown> {
-    const controller = new AbortController();
-    // Keep the timeout armed through body parsing: a provider that sends headers
-    // and then stalls the body must still abort within the window.
-    const timer = setTimeout(() => controller.abort(), VERIFY_TIMEOUT_MS);
-    try {
-      const response = await fetch(url, { ...init, signal: controller.signal });
-      if (response.status === 401 || response.status === 403) {
-        throw new ProviderAuthError('The provider rejected this API key.');
-      }
-      if (!response.ok) {
-        throw new Error(`Model list request failed (HTTP ${response.status}).`);
-      }
-      return await response.json();
-    } finally {
-      clearTimeout(timer);
-    }
-  }
-
-  private async fetchOpenAiModels(
-    baseUrl: string,
-    apiKey: string,
-    firstPartyOpenAi: boolean,
-  ): Promise<string[]> {
-    const json = (await this.fetchModelJson(`${baseUrl}/models`, {
-      headers: { Authorization: `Bearer ${apiKey}` },
-    })) as { data?: Array<{ id?: string }> };
-    const ids = (json.data ?? [])
-      .map((entry) => entry.id)
-      .filter((id): id is string => typeof id === 'string' && id.length > 0);
-    return this.filterChatModels(ids, firstPartyOpenAi).sort();
-  }
-
-  /**
-   * Drop entries that are clearly not text chat models (embeddings, audio,
-   * image, moderation) so the picker only offers models the agent can run. For
-   * first-party OpenAI, also drop legacy completion families the chat/responses
-   * API cannot drive. Custom endpoints keep their own naming, so the legacy
-   * filter is not applied to them.
-   */
-  private filterChatModels(
-    ids: string[],
-    firstPartyOpenAi: boolean,
-  ): string[] {
-    return ids.filter((id) => {
-      const lower = id.toLowerCase();
-      if (NON_CHAT_MODEL_MARKERS.some((marker) => lower.includes(marker))) {
-        return false;
-      }
-      if (firstPartyOpenAi) {
-        if (lower.endsWith('-instruct')) {
-          return false;
-        }
-        if (OPENAI_LEGACY_MODEL_MARKERS.some((marker) => lower.includes(marker))) {
-          return false;
-        }
-      }
-      return true;
-    });
-  }
-
-  private async fetchAnthropicModels(apiKey: string): Promise<string[]> {
-    const json = (await this.fetchModelJson(
-      'https://api.anthropic.com/v1/models?limit=1000',
-      {
-        headers: {
-          'x-api-key': apiKey,
-          'anthropic-version': '2023-06-01',
-          'anthropic-dangerous-direct-browser-access': 'true',
-        },
-      },
-    )) as { data?: Array<{ id?: string }> };
-    return (json.data ?? [])
-      .map((entry) => entry.id)
-      .filter((id): id is string => typeof id === 'string' && id.length > 0);
-  }
-
-  private async fetchGoogleModels(apiKey: string): Promise<string[]> {
-    const url = `https://generativelanguage.googleapis.com/v1beta/models?pageSize=1000&key=${encodeURIComponent(
-      apiKey,
-    )}`;
-    const json = (await this.fetchModelJson(url, {})) as {
-      models?: Array<{ name?: string; supportedGenerationMethods?: string[] }>;
-    };
-    return (json.models ?? [])
-      .filter((entry) =>
-        (entry.supportedGenerationMethods ?? []).includes('generateContent'),
-      )
-      .map((entry) => (entry.name ?? '').replace(/^models\//, ''))
-      .filter((id) => id.length > 0)
-      .sort();
-  }
-
-  private async fetchBedrockModels(
-    apiKey: string,
-    region: string,
-  ): Promise<string[]> {
-    const host = `https://bedrock.${region || 'us-west-2'}.amazonaws.com`;
-    const json = (await this.fetchModelJson(`${host}/foundation-models`, {
-      headers: { Authorization: `Bearer ${apiKey}` },
-    })) as { modelSummaries?: Array<{ modelId?: string }> };
-    return (json.modelSummaries ?? [])
-      .map((entry) => entry.modelId)
-      .filter((id): id is string => typeof id === 'string' && id.length > 0)
-      .sort();
   }
 
   private invalidateAgent(): void {

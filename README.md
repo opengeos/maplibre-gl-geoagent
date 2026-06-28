@@ -13,8 +13,8 @@ inspect and operate on the live map through dedicated browser tools.
 
 - Collapsible MapLibre control with a floating chat panel
 - Browser provider UI for OpenAI Responses, OpenAI Chat, Anthropic, Google Gemini, Amazon Bedrock, and any OpenAI-compatible/custom endpoint
-- API keys are saved on commit (Enter or blur) with an inline confirmation, then checked against the provider: an invalid key keeps the chat locked, while a verified key (or one that could not be reached for verification) unlocks it
-- Provider, key, and model settings live in one collapsible section that folds away once configured; the model field is a combobox that accepts a typed value or a one-click "Load models" list of the provider's available models
+- API keys are saved on commit (Enter or blur) with an inline confirmation; provider errors are shown when a prompt is sent
+- Provider, key, and model settings live in one collapsible section that folds away once configured; built-in providers default to their latest configured model, and the model can still be edited manually
 - Map tools for camera movement, projection, basemaps, markers, GeoJSON, XYZ tiles, layer visibility, opacity, feature queries, screenshots, and layer cleanup
 - Optional Google Earth Engine tools for catalog search, OAuth initialization, dataset tile layers, normalized difference indexes, visualization updates, snippets, and bounded statistics
 - Optional MapLibre JavaScript execution tool, disabled by default
@@ -118,38 +118,26 @@ Supported providers:
 
 For Bedrock, select `Amazon Bedrock`, enter a Bedrock API key, choose a Bedrock
 Converse model ID, and set the AWS region. The default Bedrock model is
-`global.anthropic.claude-sonnet-4-6`, and the default region is `us-west-2`.
+`anthropic.claude-opus-4-8`, and the default region is `us-west-2`.
 
 For a custom or self-hosted model, select `OpenAI-Compatible (Custom)`, enter the
 API base URL of an OpenAI-compatible endpoint (for example a local LLM server or
-a private deployment), supply the API key, and enter or load a model ID. The
-endpoint is called with the OpenAI Chat Completions API shape.
+a private deployment), supply the API key, and enter a model ID. The endpoint is
+called with the OpenAI Chat Completions API shape.
 
-### Saving and verifying keys
+### Saving keys and models
 
 The API key is written to `sessionStorage` only when you commit it (press Enter
 or move focus out of the field), so a half-typed key never flips the status
-badge to "Ready". After a key is committed the control calls the provider's
-model-list endpoint to verify it: a success marks the connection ready and
-fills the model field's suggestion list, an authentication error marks the key
-invalid and keeps the prompt locked, and a network/CORS failure leaves the key
-usable but
-unverified so a provider that does not allow browser model listing never blocks
-you. Use the "Load models" button to re-run this check at any time.
+badge to "Ready" or get written to storage.
 
-Auto-verification on commit only runs once the control has everything it needs
-to call the endpoint. For `OpenAI-Compatible (Custom)` that means the API base
-URL must already be a valid `http(s)` URL when you commit the key; otherwise
-finish entering the base URL first, then press "Load models" to verify and load
-the model list.
-
-The loaded list is filtered to text chat models: embeddings, speech/audio,
-image, moderation, and (for first-party OpenAI) legacy completion models such as
-`davinci` and `*-instruct` are removed. These `/models` endpoints expose no
-"deprecated" flag, so deprecated chat snapshots cannot be detected and are left
-in. Aggregator endpoints such as OpenRouter legitimately list hundreds of chat
-models from many providers; the model field is a combobox, so type to narrow the
-suggestions.
+Built-in providers use the latest model configured by the package:
+`gpt-5.5` for OpenAI Responses and OpenAI Chat, `claude-opus-4-8` for Anthropic,
+`gemini-3.5-flash` for Google Gemini, and `anthropic.claude-opus-4-8` for Amazon
+Bedrock. The "Use latest" button resets the model field to that configured
+default without calling a provider model-list endpoint. For
+`OpenAI-Compatible (Custom)`, there is no universal latest model, so enter the
+model ID exposed by that endpoint.
 
 ## Options
 
