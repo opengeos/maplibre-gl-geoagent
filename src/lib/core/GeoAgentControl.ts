@@ -158,7 +158,7 @@ interface GeoAgentUi {
   baseUrlLabel: HTMLLabelElement;
   baseUrlInput: HTMLInputElement;
   modelIdInput: HTMLInputElement;
-  modelList: HTMLDataListElement;
+  modelSuggestions: HTMLUListElement;
   loadModelsButton: HTMLButtonElement;
   configNote: HTMLDivElement;
   bedrockRegionLabel: HTMLLabelElement;
@@ -272,10 +272,19 @@ export class GeoAgentControl implements IControl {
   // result over a newer key/provider.
   private verifyToken = 0;
   private configNoteTimer: ReturnType<typeof setTimeout> | null = null;
-  // Unique per control instance so the model <input list> and its <datalist>
-  // pair up even when several controls share a page.
+  // Unique per control instance so the model input's aria-controls points at its
+  // own suggestion list even when several controls share a page.
   private static instanceCount = 0;
   private readonly modelListId = `geoagent-model-list-${(GeoAgentControl.instanceCount += 1)}`;
+  // Loaded model names backing the custom suggestion dropdown. A native
+  // <datalist> is intentionally avoided: clicking the model field to open
+  // Chrome's native datalist popup with a long list hangs the renderer.
+  private modelOptions: string[] = [];
+  // Index of the highlighted suggestion (-1 = none), and the values currently
+  // rendered in the dropdown (the filtered subset).
+  private activeSuggestion = -1;
+  private renderedSuggestions: string[] = [];
+  private suggestionBlurTimer: ReturnType<typeof setTimeout> | null = null;
   // Whether the agent was configured at the last control refresh, used to fold
   // the settings section away the first time setup completes.
   private wasConfigured = false;
@@ -372,6 +381,10 @@ export class GeoAgentControl implements IControl {
     if (this.configNoteTimer !== null) {
       clearTimeout(this.configNoteTimer);
       this.configNoteTimer = null;
+    }
+    if (this.suggestionBlurTimer !== null) {
+      clearTimeout(this.suggestionBlurTimer);
+      this.suggestionBlurTimer = null;
     }
     this.verifyToken++;
     this.activeAbortController?.abort();
@@ -645,10 +658,10 @@ export class GeoAgentControl implements IControl {
           <label class="geoagent-model-cell">
             Model
             <div class="geoagent-model-row">
-              <input class="geoagent-model-id" list="${this.modelListId}" autocomplete="off" />
+              <input class="geoagent-model-id" autocomplete="off" role="combobox" aria-autocomplete="list" aria-expanded="false" aria-controls="${this.modelListId}" />
               <button class="geoagent-load-models secondary" type="button">Load models</button>
             </div>
-            <datalist class="geoagent-model-list" id="${this.modelListId}"></datalist>
+            <ul class="geoagent-model-suggestions" id="${this.modelListId}" role="listbox" hidden></ul>
           </label>
           <div class="geoagent-config-note" aria-live="polite" hidden></div>
         </div>
@@ -706,7 +719,7 @@ export class GeoAgentControl implements IControl {
       baseUrlLabel: this.requiredElement(content, '.geoagent-base-url-row'),
       baseUrlInput: this.requiredElement(content, '.geoagent-base-url'),
       modelIdInput: this.requiredElement(content, '.geoagent-model-id'),
-      modelList: this.requiredElement(content, '.geoagent-model-list'),
+      modelSuggestions: this.requiredElement(content, '.geoagent-model-suggestions'),
       loadModelsButton: this.requiredElement(content, '.geoagent-load-models'),
       configNote: this.requiredElement(content, '.geoagent-config-note'),
       bedrockRegionLabel: this.requiredElement(content, '.geoagent-bedrock-region-row'),
@@ -880,9 +893,9 @@ export class GeoAgentControl implements IControl {
     ui.loadModelsButton.addEventListener('click', () => {
       void this.verifyAndLoadModels();
     });
-    // The model field is a combobox: typing or picking a loaded model from the
-    // attached <datalist> both fire this `input` handler, so no separate
-    // dropdown listener is needed.
+    // The model field is a combobox backed by a custom suggestion dropdown
+    // (geoagent-model-suggestions), not a native <datalist>: opening Chrome's
+    // native datalist popup with a long model list hangs the renderer.
     ui.modelIdInput.addEventListener('input', () => {
       const modelId = ui.modelIdInput.value.trim();
       this.state.modelId = modelId;
@@ -894,6 +907,31 @@ export class GeoAgentControl implements IControl {
       this.invalidateAgent();
       this.updateControls();
       this.emit('statechange');
+      this.openModelSuggestions();
+    });
+    ui.modelIdInput.addEventListener('focus', () =>
+      this.openModelSuggestions(false),
+    );
+    ui.modelIdInput.addEventListener('keydown', (event) =>
+      this.handleModelKeydown(event),
+    );
+    ui.modelIdInput.addEventListener('blur', () => {
+      // Delay so a click on a suggestion (which blurs the input first) is still
+      // handled before the list is torn down.
+      this.suggestionBlurTimer = setTimeout(
+        () => this.closeModelSuggestions(),
+        150,
+      );
+    });
+    // mousedown (not click) so selecting fires before the input's blur, and
+    // preventDefault keeps focus on the input.
+    ui.modelSuggestions.addEventListener('mousedown', (event) => {
+      const item = (event.target as HTMLElement).closest('li[data-value]');
+      if (!item) {
+        return;
+      }
+      event.preventDefault();
+      this.selectModelSuggestion(item.getAttribute('data-value') ?? '');
     });
     ui.bedrockRegionInput.addEventListener('input', () => {
       const region = ui.bedrockRegionInput.value.trim();
@@ -1635,20 +1673,144 @@ export class GeoAgentControl implements IControl {
     }
   }
 
+  // Cap on rendered suggestion rows. The dropdown filters as the user types, so
+  // this only bounds the initial/unfiltered view and keeps a pathological model
+  // list (thousands of fine-tunes) from building a huge DOM list.
+  private static readonly MAX_SUGGESTIONS = 100;
+
   private populateModelOptions(models: string[]): void {
+    this.modelOptions = models;
+    // Refresh the dropdown if it is open (e.g. the list just loaded while the
+    // field is focused); otherwise leave it closed. Show the full list rather
+    // than filtering by the default model already in the field.
+    if (this.ui && !this.ui.modelSuggestions.hidden) {
+      this.openModelSuggestions(false);
+    }
+  }
+
+  private filterModelOptions(query: string): string[] {
+    const needle = query.trim().toLowerCase();
+    const matches = needle
+      ? this.modelOptions.filter((model) =>
+          model.toLowerCase().includes(needle),
+        )
+      : this.modelOptions;
+    return matches.slice(0, GeoAgentControl.MAX_SUGGESTIONS);
+  }
+
+  /**
+   * Open (or refresh) the custom model suggestion dropdown. With `useFilter`
+   * (typing) the list narrows to the current input value; without it (focus,
+   * arrow keys) the full loaded list is shown so the user can browse even when
+   * the field already holds the default model.
+   */
+  private openModelSuggestions(useFilter = true): void {
     if (!this.ui) {
       return;
     }
-    // Loaded models become suggestions on the model field's attached <datalist>,
-    // so the single combobox input offers a dropdown while still accepting any
-    // typed value (custom endpoints, models the list misses).
-    const list = this.ui.modelList;
-    list.replaceChildren();
-    for (const model of models) {
-      const option = document.createElement('option');
-      option.value = model;
-      list.appendChild(option);
+    if (this.suggestionBlurTimer !== null) {
+      clearTimeout(this.suggestionBlurTimer);
+      this.suggestionBlurTimer = null;
     }
+    const filtered = this.filterModelOptions(
+      useFilter ? this.ui.modelIdInput.value : '',
+    );
+    if (filtered.length === 0) {
+      this.closeModelSuggestions();
+      return;
+    }
+    this.renderedSuggestions = filtered;
+    this.activeSuggestion = -1;
+    const list = this.ui.modelSuggestions;
+    list.replaceChildren(
+      ...filtered.map((model, index) => {
+        const item = document.createElement('li');
+        item.className = 'geoagent-model-suggestion';
+        item.setAttribute('role', 'option');
+        item.dataset.value = model;
+        item.id = `${this.modelListId}-opt-${index}`;
+        item.textContent = model;
+        return item;
+      }),
+    );
+    list.hidden = false;
+    this.ui.modelIdInput.setAttribute('aria-expanded', 'true');
+  }
+
+  private closeModelSuggestions(): void {
+    if (this.suggestionBlurTimer !== null) {
+      clearTimeout(this.suggestionBlurTimer);
+      this.suggestionBlurTimer = null;
+    }
+    this.renderedSuggestions = [];
+    this.activeSuggestion = -1;
+    if (this.ui) {
+      this.ui.modelSuggestions.hidden = true;
+      this.ui.modelSuggestions.replaceChildren();
+      this.ui.modelIdInput.setAttribute('aria-expanded', 'false');
+      this.ui.modelIdInput.removeAttribute('aria-activedescendant');
+    }
+  }
+
+  private selectModelSuggestion(value: string): void {
+    if (!this.ui || !value) {
+      return;
+    }
+    this.ui.modelIdInput.value = value;
+    this.ui.modelIdInput.dispatchEvent(new Event('input', { bubbles: true }));
+    this.closeModelSuggestions();
+  }
+
+  private handleModelKeydown(event: KeyboardEvent): void {
+    if (!this.ui) {
+      return;
+    }
+    if (event.key === 'Escape') {
+      if (!this.ui.modelSuggestions.hidden) {
+        event.stopPropagation();
+        this.closeModelSuggestions();
+      }
+      return;
+    }
+    if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+      if (this.ui.modelSuggestions.hidden) {
+        this.openModelSuggestions(false);
+        if (this.ui.modelSuggestions.hidden) {
+          return;
+        }
+      }
+      event.preventDefault();
+      const last = this.renderedSuggestions.length - 1;
+      if (event.key === 'ArrowDown') {
+        this.activeSuggestion =
+          this.activeSuggestion >= last ? 0 : this.activeSuggestion + 1;
+      } else {
+        this.activeSuggestion =
+          this.activeSuggestion <= 0 ? last : this.activeSuggestion - 1;
+      }
+      this.highlightActiveSuggestion();
+      return;
+    }
+    if (event.key === 'Enter' && this.activeSuggestion >= 0) {
+      event.preventDefault();
+      this.selectModelSuggestion(this.renderedSuggestions[this.activeSuggestion]);
+    }
+  }
+
+  private highlightActiveSuggestion(): void {
+    if (!this.ui) {
+      return;
+    }
+    const items =
+      this.ui.modelSuggestions.querySelectorAll<HTMLLIElement>('li');
+    items.forEach((item, index) => {
+      const active = index === this.activeSuggestion;
+      item.classList.toggle('active', active);
+      if (active) {
+        item.scrollIntoView({ block: 'nearest' });
+        this.ui?.modelIdInput.setAttribute('aria-activedescendant', item.id);
+      }
+    });
   }
 
   private normalizeBaseUrl(baseUrl: string): string {

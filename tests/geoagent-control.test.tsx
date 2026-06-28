@@ -219,6 +219,19 @@ class MockAgentMap {
   }
 }
 
+// The model field is a custom combobox: suggestions render into a <ul> only
+// while the input is focused. Focus it, then read the rendered option values.
+function openModelSuggestions(container: HTMLElement): string[] {
+  const input = container.querySelector<HTMLInputElement>(
+    ".geoagent-model-id",
+  )!;
+  input.focus();
+  input.dispatchEvent(new FocusEvent("focus"));
+  return Array.from(
+    container.querySelectorAll<HTMLLIElement>(".geoagent-model-suggestion"),
+  ).map((item) => item.dataset.value ?? "");
+}
+
 describe("GeoAgentControl", () => {
   it("adds a MapLibre control button and floating panel", () => {
     const map = new MockMap();
@@ -394,12 +407,10 @@ describe("GeoAgentControl", () => {
       expect(status.className).toContain("connected");
       expect(sendButton.title).toBe("");
       expect(prompt.disabled).toBe(false);
-      const modelList = map.mapContainer.querySelector<HTMLDataListElement>(
-        ".geoagent-model-list",
-      )!;
-      expect(
-        Array.from(modelList.options).map((option) => option.value),
-      ).toEqual(["gpt-x", "gpt-y"]);
+      // No native <datalist> (its popup hangs Chrome); a custom dropdown holds
+      // the loaded models.
+      expect(map.mapContainer.querySelector(".geoagent-model-list")).toBeNull();
+      expect(openModelSuggestions(map.mapContainer)).toEqual(["gpt-x", "gpt-y"]);
 
       prompt.value = "Zoom to San Francisco";
       prompt.dispatchEvent(new Event("input", { bubbles: true }));
@@ -591,10 +602,12 @@ describe("GeoAgentControl", () => {
       // the custom endpoint.
       apiKeyInput.dispatchEvent(new Event("change", { bubbles: true }));
 
-      const modelList = map.mapContainer.querySelector<HTMLDataListElement>(
-        ".geoagent-model-list",
-      )!;
-      await vi.waitFor(() => expect(modelList.options.length).toBe(2));
+      await vi.waitFor(() =>
+        expect(openModelSuggestions(map.mapContainer)).toEqual([
+          "local-a",
+          "local-b",
+        ]),
+      );
 
       // The request targets the normalized custom base URL (trailing slash
       // trimmed) with a Bearer token.
@@ -604,9 +617,70 @@ describe("GeoAgentControl", () => {
           headers: { Authorization: "Bearer token-xyz" },
         }),
       );
+
+      control.onRemove();
+      map.cleanup();
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("filters the custom model dropdown as you type and selects on click", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          data: [{ id: "gpt-5.5" }, { id: "gpt-4o" }, { id: "o3" }],
+        }),
+        { status: 200 },
+      ),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    try {
+      const storagePrefix = "geoagent.dropdown";
+      sessionStorage.removeItem(`${storagePrefix}.openai-responses.api_key`);
+      const map = new MockMap();
+      const control = new GeoAgentControl({ storagePrefix });
+      map.controlStack.appendChild(control.onAdd(map as never));
+
+      const apiKeyInput =
+        map.mapContainer.querySelector<HTMLInputElement>(".geoagent-api-key")!;
+      apiKeyInput.value = "sk-test";
+      apiKeyInput.dispatchEvent(new Event("change", { bubbles: true }));
+
+      const modelInput = map.mapContainer.querySelector<HTMLInputElement>(
+        ".geoagent-model-id",
+      )!;
+      const suggestions = map.mapContainer.querySelector<HTMLUListElement>(
+        ".geoagent-model-suggestions",
+      )!;
+
+      // Focusing opens the dropdown with all loaded models.
+      await vi.waitFor(() => {
+        modelInput.focus();
+        modelInput.dispatchEvent(new FocusEvent("focus"));
+        expect(suggestions.hidden).toBe(false);
+        expect(suggestions.querySelectorAll("li").length).toBe(3);
+      });
+      expect(modelInput.getAttribute("aria-expanded")).toBe("true");
+
+      // Typing filters the list.
+      modelInput.value = "gpt";
+      modelInput.dispatchEvent(new Event("input", { bubbles: true }));
       expect(
-        Array.from(modelList.options).map((option) => option.value),
-      ).toEqual(["local-a", "local-b"]);
+        Array.from(suggestions.querySelectorAll<HTMLLIElement>("li")).map(
+          (item) => item.dataset.value,
+        ),
+      ).toEqual(["gpt-4o", "gpt-5.5"]);
+
+      // Clicking (mousedown) a suggestion fills the input and closes the list.
+      const target = suggestions.querySelector<HTMLLIElement>(
+        'li[data-value="gpt-4o"]',
+      )!;
+      target.dispatchEvent(new MouseEvent("mousedown", { bubbles: true }));
+      expect(modelInput.value).toBe("gpt-4o");
+      expect(control.getState().modelId).toBe("gpt-4o");
+      expect(suggestions.hidden).toBe(true);
+      expect(modelInput.getAttribute("aria-expanded")).toBe("false");
 
       control.onRemove();
       map.cleanup();
@@ -647,15 +721,14 @@ describe("GeoAgentControl", () => {
       apiKeyInput.value = "sk-test";
       apiKeyInput.dispatchEvent(new Event("change", { bubbles: true }));
 
-      const modelList = map.mapContainer.querySelector<HTMLDataListElement>(
-        ".geoagent-model-list",
-      )!;
-      await vi.waitFor(() => expect(modelList.options.length).toBeGreaterThan(0));
       // Only the text chat models survive: embeddings, whisper/tts, dall-e,
       // moderation, the -instruct completion model, and davinci are all dropped.
-      expect(
-        Array.from(modelList.options).map((option) => option.value),
-      ).toEqual(["gpt-5.5", "o3"]);
+      await vi.waitFor(() =>
+        expect(openModelSuggestions(map.mapContainer)).toEqual([
+          "gpt-5.5",
+          "o3",
+        ]),
+      );
 
       control.onRemove();
       map.cleanup();
@@ -705,15 +778,14 @@ describe("GeoAgentControl", () => {
       apiKeyInput.value = "token-xyz";
       apiKeyInput.dispatchEvent(new Event("change", { bubbles: true }));
 
-      const modelList = map.mapContainer.querySelector<HTMLDataListElement>(
-        ".geoagent-model-list",
-      )!;
-      await vi.waitFor(() => expect(modelList.options.length).toBeGreaterThan(0));
       // The embedding model is dropped, but the chat -instruct model is kept:
       // the legacy filter is first-party-OpenAI only.
-      expect(
-        Array.from(modelList.options).map((option) => option.value),
-      ).toEqual(["llama-3.1-8b-instruct", "qwen2.5-coder"]);
+      await vi.waitFor(() =>
+        expect(openModelSuggestions(map.mapContainer)).toEqual([
+          "llama-3.1-8b-instruct",
+          "qwen2.5-coder",
+        ]),
+      );
 
       control.onRemove();
       map.cleanup();
@@ -742,19 +814,22 @@ describe("GeoAgentControl", () => {
       )!;
       expect(settings.open).toBe(true);
 
-      // The model field is a combobox: a single input bound to a <datalist> by
-      // id (no separate dropdown control).
+      // The model field is a combobox backed by a custom suggestion list, not a
+      // native <datalist>/<select> (whose popups hang Chrome on long lists).
       const modelInput = setup.mapContainer.querySelector<HTMLInputElement>(
         ".geoagent-model-id",
       )!;
-      const modelList = setup.mapContainer.querySelector<HTMLDataListElement>(
-        ".geoagent-model-list",
+      const suggestions = setup.mapContainer.querySelector<HTMLUListElement>(
+        ".geoagent-model-suggestions",
       )!;
       expect(
         setup.mapContainer.querySelector(".geoagent-model-select"),
       ).toBeNull();
-      expect(modelList.id).not.toBe("");
-      expect(modelInput.getAttribute("list")).toBe(modelList.id);
+      expect(setup.mapContainer.querySelector(".geoagent-model-list")).toBeNull();
+      expect(modelInput.getAttribute("list")).toBeNull();
+      expect(suggestions.getAttribute("role")).toBe("listbox");
+      expect(suggestions.id).not.toBe("");
+      expect(modelInput.getAttribute("aria-controls")).toBe(suggestions.id);
 
       // Completing setup mid-session (committing the key, with a default model
       // already present) folds the section away.
