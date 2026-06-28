@@ -335,157 +335,91 @@ describe("GeoAgentControl", () => {
     map.cleanup();
   });
 
-  it("reports a setup status until credentials are provided", async () => {
-    const fetchMock = vi.fn().mockResolvedValue(
-      new Response(JSON.stringify({ data: [{ id: "gpt-x" }, { id: "gpt-y" }] }), {
-        status: 200,
-      }),
-    );
-    vi.stubGlobal("fetch", fetchMock);
-    try {
-      const storagePrefix = "geoagent.setup";
-      sessionStorage.removeItem(`${storagePrefix}.openai-responses.api_key`);
-      const map = new MockMap();
-      const control = new GeoAgentControl({ storagePrefix });
-      const container = control.onAdd(map as never);
-      map.controlStack.appendChild(container);
+  it("reports a setup status until credentials are committed", () => {
+    const storagePrefix = "geoagent.setup";
+    sessionStorage.removeItem(`${storagePrefix}.openai-responses.api_key`);
+    const map = new MockMap();
+    const control = new GeoAgentControl({ storagePrefix });
+    const container = control.onAdd(map as never);
+    map.controlStack.appendChild(container);
 
-      const status =
-        map.mapContainer.querySelector<HTMLSpanElement>(".geoagent-status")!;
-      const sendButton =
-        map.mapContainer.querySelector<HTMLButtonElement>(".geoagent-send")!;
-      const prompt =
-        map.mapContainer.querySelector<HTMLTextAreaElement>(
-          ".geoagent-prompt",
-        )!;
-      const firstEntry = map.mapContainer.querySelector<HTMLElement>(
-        ".geoagent-entry .geoagent-text",
-      );
-
-      // No API key yet: the badge must not claim the agent is ready and the
-      // prompt must be locked.
-      expect(status.textContent).toBe("Setup required");
-      expect(status.className).toContain("setup");
-      expect(sendButton.disabled).toBe(true);
-      expect(sendButton.title).toContain("OpenAI API Key");
-      expect(prompt.disabled).toBe(true);
-      expect(firstEntry?.textContent).toContain("Add your OpenAI API Key");
-
-      // Typing a key must NOT flip the badge to ready or write to storage: the
-      // key only counts once the user commits it.
-      const apiKeyInput =
-        map.mapContainer.querySelector<HTMLInputElement>(".geoagent-api-key")!;
-      apiKeyInput.value = "sk-test";
-      apiKeyInput.dispatchEvent(new Event("input", { bubbles: true }));
-
-      expect(status.textContent).toBe("Setup required");
-      expect(status.className).not.toContain("connected");
-      expect(prompt.disabled).toBe(true);
-      expect(
-        sessionStorage.getItem(`${storagePrefix}.openai-responses.api_key`),
-      ).toBeNull();
-
-      // Committing the key (Enter) saves it and shows the confirmation note.
-      apiKeyInput.dispatchEvent(
-        new KeyboardEvent("keydown", { key: "Enter", bubbles: true }),
-      );
-      expect(
-        sessionStorage.getItem(`${storagePrefix}.openai-responses.api_key`),
-      ).toBe("sk-test");
-      const note = map.mapContainer.querySelector<HTMLElement>(
-        ".geoagent-config-note",
+    const status =
+      map.mapContainer.querySelector<HTMLSpanElement>(".geoagent-status")!;
+    const sendButton =
+      map.mapContainer.querySelector<HTMLButtonElement>(".geoagent-send")!;
+    const prompt =
+      map.mapContainer.querySelector<HTMLTextAreaElement>(
+        ".geoagent-prompt",
       )!;
-      expect([
-        "API key saved.",
-        "Verifying connection…",
-        "Connection verified. 2 models available.",
-      ]).toContain(note.textContent);
+    const firstEntry = map.mapContainer.querySelector<HTMLElement>(
+      ".geoagent-entry .geoagent-text",
+    );
 
-      // Verification accepts the key, flips the badge to ready, unlocks the
-      // prompt, and populates the model dropdown.
-      await vi.waitFor(() => expect(status.textContent).toBe("Ready"));
-      expect(status.className).toContain("connected");
-      expect(sendButton.title).toBe("");
-      expect(prompt.disabled).toBe(false);
-      // No native <datalist> (its popup hangs Chrome); a custom dropdown holds
-      // the loaded models.
-      expect(map.mapContainer.querySelector(".geoagent-model-list")).toBeNull();
-      expect(openModelSuggestions(map.mapContainer)).toEqual(["gpt-x", "gpt-y"]);
+    expect(status.textContent).toBe("Setup required");
+    expect(status.className).toContain("setup");
+    expect(sendButton.disabled).toBe(true);
+    expect(sendButton.title).toContain("OpenAI API Key");
+    expect(prompt.disabled).toBe(true);
+    expect(firstEntry?.textContent).toContain("Add your OpenAI API Key");
 
-      prompt.value = "Zoom to San Francisco";
-      prompt.dispatchEvent(new Event("input", { bubbles: true }));
-      expect(sendButton.disabled).toBe(false);
+    const apiKeyInput =
+      map.mapContainer.querySelector<HTMLInputElement>(".geoagent-api-key")!;
+    apiKeyInput.value = "sk-test";
+    apiKeyInput.dispatchEvent(new Event("input", { bubbles: true }));
 
-      control.onRemove();
-      map.cleanup();
-    } finally {
-      vi.unstubAllGlobals();
-    }
+    expect(status.textContent).toBe("Setup required");
+    expect(status.className).not.toContain("connected");
+    expect(prompt.disabled).toBe(true);
+    expect(
+      sessionStorage.getItem(`${storagePrefix}.openai-responses.api_key`),
+    ).toBeNull();
+
+    apiKeyInput.dispatchEvent(
+      new KeyboardEvent("keydown", { key: "Enter", bubbles: true }),
+    );
+    expect(
+      sessionStorage.getItem(`${storagePrefix}.openai-responses.api_key`),
+    ).toBe("sk-test");
+    expect(
+      map.mapContainer.querySelector<HTMLElement>(".geoagent-config-note")
+        ?.textContent,
+    ).toBe("API key saved.");
+
+    expect(status.textContent).toBe("Ready");
+    expect(status.className).toContain("connected");
+    expect(sendButton.title).toBe("");
+    expect(prompt.disabled).toBe(false);
+    expect(map.mapContainer.querySelector(".geoagent-model-list")).toBeNull();
+    expect(openModelSuggestions(map.mapContainer)).toEqual([]);
+
+    prompt.value = "Zoom to San Francisco";
+    prompt.dispatchEvent(new Event("input", { bubbles: true }));
+    expect(sendButton.disabled).toBe(false);
+
+    control.onRemove();
+    map.cleanup();
   });
 
-  it("marks an invalid API key and keeps the prompt locked", async () => {
-    const fetchMock = vi
-      .fn()
-      .mockResolvedValue(new Response("nope", { status: 401 }));
+  it("does not call model-list endpoints when an API key is committed", () => {
+    const fetchMock = vi.fn();
     vi.stubGlobal("fetch", fetchMock);
     try {
-      const storagePrefix = "geoagent.invalid";
+      const storagePrefix = "geoagent.no-model-list";
       sessionStorage.removeItem(`${storagePrefix}.openai-responses.api_key`);
       const map = new MockMap();
       const control = new GeoAgentControl({ storagePrefix });
-      const container = control.onAdd(map as never);
-      map.controlStack.appendChild(container);
-
-      const apiKeyInput =
-        map.mapContainer.querySelector<HTMLInputElement>(".geoagent-api-key")!;
-      apiKeyInput.value = "sk-bad";
-      apiKeyInput.dispatchEvent(new Event("change", { bubbles: true }));
-
-      const status =
-        map.mapContainer.querySelector<HTMLSpanElement>(".geoagent-status")!;
-      await vi.waitFor(() =>
-        expect(status.textContent).toBe("Invalid API key"),
-      );
-      expect(status.className).toContain("error");
-      const prompt =
-        map.mapContainer.querySelector<HTMLTextAreaElement>(
-          ".geoagent-prompt",
-        )!;
-      expect(prompt.disabled).toBe(true);
-
-      control.onRemove();
-      map.cleanup();
-    } finally {
-      vi.unstubAllGlobals();
-    }
-  });
-
-  it("keeps the key usable when verification cannot reach the provider", async () => {
-    const fetchMock = vi.fn().mockRejectedValue(new Error("network down"));
-    vi.stubGlobal("fetch", fetchMock);
-    try {
-      const storagePrefix = "geoagent.offline";
-      sessionStorage.removeItem(`${storagePrefix}.openai-responses.api_key`);
-      const map = new MockMap();
-      const control = new GeoAgentControl({ storagePrefix });
-      const container = control.onAdd(map as never);
-      map.controlStack.appendChild(container);
+      map.controlStack.appendChild(control.onAdd(map as never));
 
       const apiKeyInput =
         map.mapContainer.querySelector<HTMLInputElement>(".geoagent-api-key")!;
       apiKeyInput.value = "sk-test";
       apiKeyInput.dispatchEvent(new Event("change", { bubbles: true }));
 
-      const status =
-        map.mapContainer.querySelector<HTMLSpanElement>(".geoagent-status")!;
-      const prompt =
-        map.mapContainer.querySelector<HTMLTextAreaElement>(
-          ".geoagent-prompt",
-        )!;
-      // A network/CORS failure must not block the user: the configured key
-      // stays usable and the prompt unlocks.
-      await vi.waitFor(() => expect(prompt.disabled).toBe(false));
-      expect(status.textContent).toBe("Ready");
+      expect(fetchMock).not.toHaveBeenCalled();
+      expect(
+        map.mapContainer.querySelector<HTMLSpanElement>(".geoagent-status")
+          ?.textContent,
+      ).toBe("Ready");
 
       control.onRemove();
       map.cleanup();
@@ -563,229 +497,58 @@ describe("GeoAgentControl", () => {
     map.cleanup();
   });
 
-  it("loads models for the custom provider from its base URL", async () => {
-    const fetchMock = vi.fn().mockResolvedValue(
-      new Response(
-        JSON.stringify({ data: [{ id: "local-a" }, { id: "local-b" }] }),
-        { status: 200 },
-      ),
-    );
-    vi.stubGlobal("fetch", fetchMock);
-    try {
-      const storagePrefix = "geoagent.custom.load";
-      for (const key of [
-        `${storagePrefix}.provider`,
-        `${storagePrefix}.openai-compatible.api_key`,
-        `${storagePrefix}.baseUrl.openai-compatible`,
-        `${storagePrefix}.model.openai-compatible`,
-      ]) {
-        sessionStorage.removeItem(key);
-      }
+  it("uses the configured latest model for each built-in provider", () => {
+    const cases = [
+      ["openai-responses", "gpt-5.5"],
+      ["openai-chat", "gpt-5.5"],
+      ["anthropic", "claude-opus-4-8"],
+      ["google", "gemini-3.5-flash"],
+      ["bedrock", "anthropic.claude-opus-4-8"],
+    ] as const;
+
+    for (const [provider, modelId] of cases) {
       const map = new MockMap();
       const control = new GeoAgentControl({
-        storagePrefix,
-        defaultProvider: "openai-compatible",
+        storagePrefix: `geoagent.latest.${provider}`,
+        defaultProvider: provider,
       });
-      const container = control.onAdd(map as never);
-      map.controlStack.appendChild(container);
+      map.controlStack.appendChild(control.onAdd(map as never));
 
-      const baseUrlInput = map.mapContainer.querySelector<HTMLInputElement>(
-        ".geoagent-base-url",
-      )!;
-      baseUrlInput.value = "https://llm.example.com/v1/";
-      baseUrlInput.dispatchEvent(new Event("input", { bubbles: true }));
-
-      const apiKeyInput =
-        map.mapContainer.querySelector<HTMLInputElement>(".geoagent-api-key")!;
-      apiKeyInput.value = "token-xyz";
-      // Committing the key with a valid base URL present auto-verifies against
-      // the custom endpoint.
-      apiKeyInput.dispatchEvent(new Event("change", { bubbles: true }));
-
-      await vi.waitFor(() =>
-        expect(openModelSuggestions(map.mapContainer)).toEqual([
-          "local-a",
-          "local-b",
-        ]),
-      );
-
-      // The request targets the normalized custom base URL (trailing slash
-      // trimmed) with a Bearer token.
-      expect(fetchMock).toHaveBeenCalledWith(
-        "https://llm.example.com/v1/models",
-        expect.objectContaining({
-          headers: { Authorization: "Bearer token-xyz" },
-        }),
-      );
+      expect(
+        map.mapContainer.querySelector<HTMLInputElement>(".geoagent-model-id")
+          ?.value,
+      ).toBe(modelId);
 
       control.onRemove();
       map.cleanup();
-    } finally {
-      vi.unstubAllGlobals();
     }
   });
 
-  it("filters the custom model dropdown as you type and selects on click", async () => {
-    const fetchMock = vi.fn().mockResolvedValue(
-      new Response(
-        JSON.stringify({
-          data: [{ id: "gpt-5.5" }, { id: "gpt-4o" }, { id: "o3" }],
-        }),
-        { status: 200 },
-      ),
-    );
+  it("resets a built-in provider to its latest model without a network request", () => {
+    const fetchMock = vi.fn();
     vi.stubGlobal("fetch", fetchMock);
     try {
-      const storagePrefix = "geoagent.dropdown";
-      sessionStorage.removeItem(`${storagePrefix}.openai-responses.api_key`);
+      const storagePrefix = "geoagent.use-latest";
+      sessionStorage.setItem(
+        `${storagePrefix}.model.openai-responses`,
+        "old-model",
+      );
       const map = new MockMap();
       const control = new GeoAgentControl({ storagePrefix });
       map.controlStack.appendChild(control.onAdd(map as never));
-
-      const apiKeyInput =
-        map.mapContainer.querySelector<HTMLInputElement>(".geoagent-api-key")!;
-      apiKeyInput.value = "sk-test";
-      apiKeyInput.dispatchEvent(new Event("change", { bubbles: true }));
 
       const modelInput = map.mapContainer.querySelector<HTMLInputElement>(
         ".geoagent-model-id",
       )!;
-      const suggestions = map.mapContainer.querySelector<HTMLUListElement>(
-        ".geoagent-model-suggestions",
-      )!;
+      expect(modelInput.value).toBe("old-model");
 
-      // Focusing opens the dropdown with all loaded models.
-      await vi.waitFor(() => {
-        modelInput.focus();
-        modelInput.dispatchEvent(new FocusEvent("focus"));
-        expect(suggestions.hidden).toBe(false);
-        expect(suggestions.querySelectorAll("li").length).toBe(3);
-      });
-      expect(modelInput.getAttribute("aria-expanded")).toBe("true");
+      map.mapContainer
+        .querySelector<HTMLButtonElement>(".geoagent-load-models")!
+        .click();
 
-      // Typing filters the list.
-      modelInput.value = "gpt";
-      modelInput.dispatchEvent(new Event("input", { bubbles: true }));
-      expect(
-        Array.from(suggestions.querySelectorAll<HTMLLIElement>("li")).map(
-          (item) => item.dataset.value,
-        ),
-      ).toEqual(["gpt-4o", "gpt-5.5"]);
-
-      // Clicking (mousedown) a suggestion fills the input and closes the list.
-      const target = suggestions.querySelector<HTMLLIElement>(
-        'li[data-value="gpt-4o"]',
-      )!;
-      target.dispatchEvent(new MouseEvent("mousedown", { bubbles: true }));
-      expect(modelInput.value).toBe("gpt-4o");
-      expect(control.getState().modelId).toBe("gpt-4o");
-      expect(suggestions.hidden).toBe(true);
-      expect(modelInput.getAttribute("aria-expanded")).toBe("false");
-
-      control.onRemove();
-      map.cleanup();
-    } finally {
-      vi.unstubAllGlobals();
-    }
-  });
-
-  it("filters non-chat and legacy models out of the first-party OpenAI list", async () => {
-    const fetchMock = vi.fn().mockResolvedValue(
-      new Response(
-        JSON.stringify({
-          data: [
-            { id: "gpt-5.5" },
-            { id: "o3" },
-            { id: "text-embedding-3-large" },
-            { id: "whisper-1" },
-            { id: "gpt-4o-mini-tts" },
-            { id: "dall-e-3" },
-            { id: "omni-moderation-latest" },
-            { id: "gpt-3.5-turbo-instruct" },
-            { id: "davinci-002" },
-          ],
-        }),
-        { status: 200 },
-      ),
-    );
-    vi.stubGlobal("fetch", fetchMock);
-    try {
-      const storagePrefix = "geoagent.filter.openai";
-      sessionStorage.removeItem(`${storagePrefix}.openai-responses.api_key`);
-      const map = new MockMap();
-      const control = new GeoAgentControl({ storagePrefix });
-      map.controlStack.appendChild(control.onAdd(map as never));
-
-      const apiKeyInput =
-        map.mapContainer.querySelector<HTMLInputElement>(".geoagent-api-key")!;
-      apiKeyInput.value = "sk-test";
-      apiKeyInput.dispatchEvent(new Event("change", { bubbles: true }));
-
-      // Only the text chat models survive: embeddings, whisper/tts, dall-e,
-      // moderation, the -instruct completion model, and davinci are all dropped.
-      await vi.waitFor(() =>
-        expect(openModelSuggestions(map.mapContainer)).toEqual([
-          "gpt-5.5",
-          "o3",
-        ]),
-      );
-
-      control.onRemove();
-      map.cleanup();
-    } finally {
-      vi.unstubAllGlobals();
-    }
-  });
-
-  it("keeps -instruct models from a custom endpoint (only first-party legacy is filtered)", async () => {
-    const fetchMock = vi.fn().mockResolvedValue(
-      new Response(
-        JSON.stringify({
-          data: [
-            { id: "llama-3.1-8b-instruct" },
-            { id: "qwen2.5-coder" },
-            { id: "nomic-embed-text" },
-          ],
-        }),
-        { status: 200 },
-      ),
-    );
-    vi.stubGlobal("fetch", fetchMock);
-    try {
-      const storagePrefix = "geoagent.filter.custom";
-      for (const key of [
-        `${storagePrefix}.provider`,
-        `${storagePrefix}.openai-compatible.api_key`,
-        `${storagePrefix}.baseUrl.openai-compatible`,
-        `${storagePrefix}.model.openai-compatible`,
-      ]) {
-        sessionStorage.removeItem(key);
-      }
-      const map = new MockMap();
-      const control = new GeoAgentControl({
-        storagePrefix,
-        defaultProvider: "openai-compatible",
-      });
-      map.controlStack.appendChild(control.onAdd(map as never));
-
-      const baseUrlInput = map.mapContainer.querySelector<HTMLInputElement>(
-        ".geoagent-base-url",
-      )!;
-      baseUrlInput.value = "https://llm.example.com/v1";
-      baseUrlInput.dispatchEvent(new Event("input", { bubbles: true }));
-      const apiKeyInput =
-        map.mapContainer.querySelector<HTMLInputElement>(".geoagent-api-key")!;
-      apiKeyInput.value = "token-xyz";
-      apiKeyInput.dispatchEvent(new Event("change", { bubbles: true }));
-
-      // The embedding model is dropped, but the chat -instruct model is kept:
-      // the legacy filter is first-party-OpenAI only.
-      await vi.waitFor(() =>
-        expect(openModelSuggestions(map.mapContainer)).toEqual([
-          "llama-3.1-8b-instruct",
-          "qwen2.5-coder",
-        ]),
-      );
+      expect(modelInput.value).toBe("gpt-5.5");
+      expect(control.getState().modelId).toBe("gpt-5.5");
+      expect(fetchMock).not.toHaveBeenCalled();
 
       control.onRemove();
       map.cleanup();
@@ -795,11 +558,8 @@ describe("GeoAgentControl", () => {
   });
 
   it("collapses the settings section once configured and binds the model combobox", () => {
-    // The auto-verify fired on key commit must not hit the network.
-    vi.stubGlobal(
-      "fetch",
-      vi.fn().mockResolvedValue(new Response("{}", { status: 200 })),
-    );
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
     try {
       // No key: setup is needed, so the settings section starts expanded.
       sessionStorage.removeItem("geoagent.collapse.setup.openai-responses.api_key");
@@ -839,6 +599,7 @@ describe("GeoAgentControl", () => {
       apiKeyInput.value = "sk-test";
       apiKeyInput.dispatchEvent(new Event("change", { bubbles: true }));
       expect(settings.open).toBe(false);
+      expect(fetchMock).not.toHaveBeenCalled();
 
       // Manually re-opening it must survive an unrelated refresh (typing a
       // prompt) — the collapse only fires on the not-configured -> configured
@@ -1002,7 +763,7 @@ describe("GeoAgentControl", () => {
     expect(regionInput?.value).toBe("us-west-2");
     expect(control.getState()).toMatchObject({
       providerId: "bedrock",
-      modelId: "global.anthropic.claude-sonnet-4-6",
+      modelId: "anthropic.claude-opus-4-8",
       bedrockRegion: "us-west-2",
     });
 

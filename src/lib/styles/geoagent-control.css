@@ -314,7 +314,7 @@ body.geoagent-panel-resizing {
 .geoagent-model-row .geoagent-model-id {
   flex: 1 1 auto;
   /* Allow the input to shrink in the resizable panel instead of overflowing the
-     row next to the fixed-width Load models button. */
+     row next to the fixed-width Use latest button. */
   min-width: 0;
 }
 
