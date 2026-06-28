@@ -55,6 +55,32 @@ type VerifyState = 'idle' | 'verifying' | 'ok' | 'invalid' | 'unverified';
 // the user.
 class ProviderAuthError extends Error {}
 
+// Substrings that mark a model from an OpenAI-shaped /models endpoint as
+// something other than a text chat model (embeddings, speech/audio, image
+// generation, moderation/guard, rerankers). None of these can drive the chat
+// agent on any OpenAI-compatible endpoint, so they are dropped from the model
+// picker. There is no "deprecated" flag in these APIs, so deprecated *chat*
+// snapshots cannot be detected and are intentionally left in.
+const NON_CHAT_MODEL_MARKERS = [
+  'embed',
+  'whisper',
+  'tts',
+  'text-to-speech',
+  'transcribe',
+  'realtime',
+  'moderation',
+  'dall-e',
+  'gpt-image',
+  'rerank',
+  'guard',
+];
+
+// Legacy OpenAI completion families the chat/responses agent cannot drive. Only
+// applied to first-party OpenAI: a custom endpoint may legitimately name a chat
+// model "...-instruct" (e.g. a local Llama Instruct build), so the markers must
+// not be applied there.
+const OPENAI_LEGACY_MODEL_MARKERS = ['davinci', 'babbage', 'curie'];
+
 const BASE_PROVIDER_CONFIGS: Record<
   GeoAgentProviderId,
   Omit<GeoAgentProviderConfig, 'storageKey'>
@@ -1644,9 +1670,13 @@ export class GeoAgentControl implements IControl {
     switch (provider.id) {
       case 'openai-responses':
       case 'openai-chat':
-        return this.fetchOpenAiModels('https://api.openai.com/v1', apiKey);
+        return this.fetchOpenAiModels('https://api.openai.com/v1', apiKey, true);
       case 'openai-compatible':
-        return this.fetchOpenAiModels(this.normalizeBaseUrl(baseUrl), apiKey);
+        return this.fetchOpenAiModels(
+          this.normalizeBaseUrl(baseUrl),
+          apiKey,
+          false,
+        );
       case 'anthropic':
         return this.fetchAnthropicModels(apiKey);
       case 'google':
@@ -1683,14 +1713,43 @@ export class GeoAgentControl implements IControl {
   private async fetchOpenAiModels(
     baseUrl: string,
     apiKey: string,
+    firstPartyOpenAi: boolean,
   ): Promise<string[]> {
     const json = (await this.fetchModelJson(`${baseUrl}/models`, {
       headers: { Authorization: `Bearer ${apiKey}` },
     })) as { data?: Array<{ id?: string }> };
-    return (json.data ?? [])
+    const ids = (json.data ?? [])
       .map((entry) => entry.id)
-      .filter((id): id is string => typeof id === 'string' && id.length > 0)
-      .sort();
+      .filter((id): id is string => typeof id === 'string' && id.length > 0);
+    return this.filterChatModels(ids, firstPartyOpenAi).sort();
+  }
+
+  /**
+   * Drop entries that are clearly not text chat models (embeddings, audio,
+   * image, moderation) so the picker only offers models the agent can run. For
+   * first-party OpenAI, also drop legacy completion families the chat/responses
+   * API cannot drive. Custom endpoints keep their own naming, so the legacy
+   * filter is not applied to them.
+   */
+  private filterChatModels(
+    ids: string[],
+    firstPartyOpenAi: boolean,
+  ): string[] {
+    return ids.filter((id) => {
+      const lower = id.toLowerCase();
+      if (NON_CHAT_MODEL_MARKERS.some((marker) => lower.includes(marker))) {
+        return false;
+      }
+      if (firstPartyOpenAi) {
+        if (lower.endsWith('-instruct')) {
+          return false;
+        }
+        if (OPENAI_LEGACY_MODEL_MARKERS.some((marker) => lower.includes(marker))) {
+          return false;
+        }
+      }
+      return true;
+    });
   }
 
   private async fetchAnthropicModels(apiKey: string): Promise<string[]> {

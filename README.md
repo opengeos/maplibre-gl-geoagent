@@ -143,6 +143,14 @@ URL must already be a valid `http(s)` URL when you commit the key; otherwise
 finish entering the base URL first, then press "Load models" to verify and load
 the model list.
 
+The loaded list is filtered to text chat models: embeddings, speech/audio,
+image, moderation, and (for first-party OpenAI) legacy completion models such as
+`davinci` and `*-instruct` are removed. These `/models` endpoints expose no
+"deprecated" flag, so deprecated chat snapshots cannot be detected and are left
+in. Aggregator endpoints such as OpenRouter legitimately list hundreds of chat
+models from many providers; the model field is a combobox, so type to narrow the
+suggestions.
+
 ## Options
 
 | Option                         | Type                                                           | Default               |
