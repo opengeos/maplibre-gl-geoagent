@@ -394,13 +394,12 @@ describe("GeoAgentControl", () => {
       expect(status.className).toContain("connected");
       expect(sendButton.title).toBe("");
       expect(prompt.disabled).toBe(false);
-      const modelSelect = map.mapContainer.querySelector<HTMLSelectElement>(
-        ".geoagent-model-select",
+      const modelList = map.mapContainer.querySelector<HTMLDataListElement>(
+        ".geoagent-model-list",
       )!;
-      expect(modelSelect.hidden).toBe(false);
       expect(
-        Array.from(modelSelect.options).map((option) => option.value),
-      ).toEqual(["", "gpt-x", "gpt-y"]);
+        Array.from(modelList.options).map((option) => option.value),
+      ).toEqual(["gpt-x", "gpt-y"]);
 
       prompt.value = "Zoom to San Francisco";
       prompt.dispatchEvent(new Event("input", { bubbles: true }));
@@ -592,10 +591,10 @@ describe("GeoAgentControl", () => {
       // the custom endpoint.
       apiKeyInput.dispatchEvent(new Event("change", { bubbles: true }));
 
-      const modelSelect = map.mapContainer.querySelector<HTMLSelectElement>(
-        ".geoagent-model-select",
+      const modelList = map.mapContainer.querySelector<HTMLDataListElement>(
+        ".geoagent-model-list",
       )!;
-      await vi.waitFor(() => expect(modelSelect.hidden).toBe(false));
+      await vi.waitFor(() => expect(modelList.options.length).toBe(2));
 
       // The request targets the normalized custom base URL (trailing slash
       // trimmed) with a Bearer token.
@@ -606,11 +605,197 @@ describe("GeoAgentControl", () => {
         }),
       );
       expect(
-        Array.from(modelSelect.options).map((option) => option.value),
-      ).toEqual(["", "local-a", "local-b"]);
+        Array.from(modelList.options).map((option) => option.value),
+      ).toEqual(["local-a", "local-b"]);
 
       control.onRemove();
       map.cleanup();
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("filters non-chat and legacy models out of the first-party OpenAI list", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          data: [
+            { id: "gpt-5.5" },
+            { id: "o3" },
+            { id: "text-embedding-3-large" },
+            { id: "whisper-1" },
+            { id: "gpt-4o-mini-tts" },
+            { id: "dall-e-3" },
+            { id: "omni-moderation-latest" },
+            { id: "gpt-3.5-turbo-instruct" },
+            { id: "davinci-002" },
+          ],
+        }),
+        { status: 200 },
+      ),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    try {
+      const storagePrefix = "geoagent.filter.openai";
+      sessionStorage.removeItem(`${storagePrefix}.openai-responses.api_key`);
+      const map = new MockMap();
+      const control = new GeoAgentControl({ storagePrefix });
+      map.controlStack.appendChild(control.onAdd(map as never));
+
+      const apiKeyInput =
+        map.mapContainer.querySelector<HTMLInputElement>(".geoagent-api-key")!;
+      apiKeyInput.value = "sk-test";
+      apiKeyInput.dispatchEvent(new Event("change", { bubbles: true }));
+
+      const modelList = map.mapContainer.querySelector<HTMLDataListElement>(
+        ".geoagent-model-list",
+      )!;
+      await vi.waitFor(() => expect(modelList.options.length).toBeGreaterThan(0));
+      // Only the text chat models survive: embeddings, whisper/tts, dall-e,
+      // moderation, the -instruct completion model, and davinci are all dropped.
+      expect(
+        Array.from(modelList.options).map((option) => option.value),
+      ).toEqual(["gpt-5.5", "o3"]);
+
+      control.onRemove();
+      map.cleanup();
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("keeps -instruct models from a custom endpoint (only first-party legacy is filtered)", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          data: [
+            { id: "llama-3.1-8b-instruct" },
+            { id: "qwen2.5-coder" },
+            { id: "nomic-embed-text" },
+          ],
+        }),
+        { status: 200 },
+      ),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    try {
+      const storagePrefix = "geoagent.filter.custom";
+      for (const key of [
+        `${storagePrefix}.provider`,
+        `${storagePrefix}.openai-compatible.api_key`,
+        `${storagePrefix}.baseUrl.openai-compatible`,
+        `${storagePrefix}.model.openai-compatible`,
+      ]) {
+        sessionStorage.removeItem(key);
+      }
+      const map = new MockMap();
+      const control = new GeoAgentControl({
+        storagePrefix,
+        defaultProvider: "openai-compatible",
+      });
+      map.controlStack.appendChild(control.onAdd(map as never));
+
+      const baseUrlInput = map.mapContainer.querySelector<HTMLInputElement>(
+        ".geoagent-base-url",
+      )!;
+      baseUrlInput.value = "https://llm.example.com/v1";
+      baseUrlInput.dispatchEvent(new Event("input", { bubbles: true }));
+      const apiKeyInput =
+        map.mapContainer.querySelector<HTMLInputElement>(".geoagent-api-key")!;
+      apiKeyInput.value = "token-xyz";
+      apiKeyInput.dispatchEvent(new Event("change", { bubbles: true }));
+
+      const modelList = map.mapContainer.querySelector<HTMLDataListElement>(
+        ".geoagent-model-list",
+      )!;
+      await vi.waitFor(() => expect(modelList.options.length).toBeGreaterThan(0));
+      // The embedding model is dropped, but the chat -instruct model is kept:
+      // the legacy filter is first-party-OpenAI only.
+      expect(
+        Array.from(modelList.options).map((option) => option.value),
+      ).toEqual(["llama-3.1-8b-instruct", "qwen2.5-coder"]);
+
+      control.onRemove();
+      map.cleanup();
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("collapses the settings section once configured and binds the model combobox", () => {
+    // The auto-verify fired on key commit must not hit the network.
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(new Response("{}", { status: 200 })),
+    );
+    try {
+      // No key: setup is needed, so the settings section starts expanded.
+      sessionStorage.removeItem("geoagent.collapse.setup.openai-responses.api_key");
+      const setup = new MockMap();
+      const setupControl = new GeoAgentControl({
+        storagePrefix: "geoagent.collapse.setup",
+      });
+      setup.controlStack.appendChild(setupControl.onAdd(setup as never));
+
+      const settings = setup.mapContainer.querySelector<HTMLDetailsElement>(
+        ".geoagent-settings",
+      )!;
+      expect(settings.open).toBe(true);
+
+      // The model field is a combobox: a single input bound to a <datalist> by
+      // id (no separate dropdown control).
+      const modelInput = setup.mapContainer.querySelector<HTMLInputElement>(
+        ".geoagent-model-id",
+      )!;
+      const modelList = setup.mapContainer.querySelector<HTMLDataListElement>(
+        ".geoagent-model-list",
+      )!;
+      expect(
+        setup.mapContainer.querySelector(".geoagent-model-select"),
+      ).toBeNull();
+      expect(modelList.id).not.toBe("");
+      expect(modelInput.getAttribute("list")).toBe(modelList.id);
+
+      // Completing setup mid-session (committing the key, with a default model
+      // already present) folds the section away.
+      const apiKeyInput = setup.mapContainer.querySelector<HTMLInputElement>(
+        ".geoagent-api-key",
+      )!;
+      apiKeyInput.value = "sk-test";
+      apiKeyInput.dispatchEvent(new Event("change", { bubbles: true }));
+      expect(settings.open).toBe(false);
+
+      // Manually re-opening it must survive an unrelated refresh (typing a
+      // prompt) — the collapse only fires on the not-configured -> configured
+      // edge, never on every update.
+      settings.open = true;
+      const prompt = setup.mapContainer.querySelector<HTMLTextAreaElement>(
+        ".geoagent-prompt",
+      )!;
+      prompt.value = "hello";
+      prompt.dispatchEvent(new Event("input", { bubbles: true }));
+      expect(settings.open).toBe(true);
+
+      setupControl.onRemove();
+      setup.cleanup();
+
+      // A pre-supplied key means the agent is configured, so the section starts
+      // collapsed to leave more room for the chat.
+      const ready = new MockMap();
+      const readyControl = new GeoAgentControl({
+        storagePrefix: "geoagent.collapse.ready",
+        apiKeys: { "openai-responses": "sk-test" },
+      });
+      ready.controlStack.appendChild(readyControl.onAdd(ready as never));
+
+      expect(
+        ready.mapContainer.querySelector<HTMLDetailsElement>(
+          ".geoagent-settings",
+        )!.open,
+      ).toBe(false);
+
+      readyControl.onRemove();
+      ready.cleanup();
     } finally {
       vi.unstubAllGlobals();
     }

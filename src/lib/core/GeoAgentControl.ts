@@ -55,6 +55,32 @@ type VerifyState = 'idle' | 'verifying' | 'ok' | 'invalid' | 'unverified';
 // the user.
 class ProviderAuthError extends Error {}
 
+// Substrings that mark a model from an OpenAI-shaped /models endpoint as
+// something other than a text chat model (embeddings, speech/audio, image
+// generation, moderation/guard, rerankers). None of these can drive the chat
+// agent on any OpenAI-compatible endpoint, so they are dropped from the model
+// picker. There is no "deprecated" flag in these APIs, so deprecated *chat*
+// snapshots cannot be detected and are intentionally left in.
+const NON_CHAT_MODEL_MARKERS = [
+  'embed',
+  'whisper',
+  'tts',
+  'text-to-speech',
+  'transcribe',
+  'realtime',
+  'moderation',
+  'dall-e',
+  'gpt-image',
+  'rerank',
+  'guard',
+];
+
+// Legacy OpenAI completion families the chat/responses agent cannot drive. Only
+// applied to first-party OpenAI: a custom endpoint may legitimately name a chat
+// model "...-instruct" (e.g. a local Llama Instruct build), so the markers must
+// not be applied there.
+const OPENAI_LEGACY_MODEL_MARKERS = ['davinci', 'babbage', 'curie'];
+
 const BASE_PROVIDER_CONFIGS: Record<
   GeoAgentProviderId,
   Omit<GeoAgentProviderConfig, 'storageKey'>
@@ -125,13 +151,14 @@ When no dedicated browser map tool can perform the requested MapLibre operation,
 
 interface GeoAgentUi {
   status: HTMLSpanElement;
+  settingsDetails: HTMLDetailsElement;
   providerSelect: HTMLSelectElement;
   apiKeyLabel: HTMLSpanElement;
   apiKeyInput: HTMLInputElement;
   baseUrlLabel: HTMLLabelElement;
   baseUrlInput: HTMLInputElement;
   modelIdInput: HTMLInputElement;
-  modelSelect: HTMLSelectElement;
+  modelList: HTMLDataListElement;
   loadModelsButton: HTMLButtonElement;
   configNote: HTMLDivElement;
   bedrockRegionLabel: HTMLLabelElement;
@@ -245,6 +272,13 @@ export class GeoAgentControl implements IControl {
   // result over a newer key/provider.
   private verifyToken = 0;
   private configNoteTimer: ReturnType<typeof setTimeout> | null = null;
+  // Unique per control instance so the model <input list> and its <datalist>
+  // pair up even when several controls share a page.
+  private static instanceCount = 0;
+  private readonly modelListId = `geoagent-model-list-${(GeoAgentControl.instanceCount += 1)}`;
+  // Whether the agent was configured at the last control refresh, used to fold
+  // the settings section away the first time setup completes.
+  private wasConfigured = false;
 
   constructor(options: GeoAgentControlOptions = {}) {
     this.options = {
@@ -306,6 +340,13 @@ export class GeoAgentControl implements IControl {
     });
     this.setupEventListeners();
     this.loadProviderSettings();
+    // Start the settings expanded only when setup is still needed; once the
+    // agent is configured the section collapses so the chat has more room (the
+    // status badge keeps showing the connection state either way).
+    if (this.ui) {
+      this.wasConfigured = this.isConfigured();
+      this.ui.settingsDetails.open = !this.wasConfigured;
+    }
     this.applyIdleStatus(true);
     this.appendLog('system', this.readyLogMessage());
     this.updateControls();
@@ -582,33 +623,36 @@ export class GeoAgentControl implements IControl {
     const content = document.createElement('div');
     content.className = 'geoagent-panel-content';
     content.innerHTML = `
-      <div class="geoagent-settings-grid">
-        <label>
-          Provider
-          <select class="geoagent-provider"></select>
-        </label>
-        <label>
-          <span class="geoagent-api-key-label">API Key</span>
-          <input class="geoagent-api-key" type="password" autocomplete="off" placeholder="sk-..." />
-        </label>
-        <label class="geoagent-base-url-row" hidden>
-          API Base URL
-          <input class="geoagent-base-url" autocomplete="off" placeholder="https://host/v1" />
-        </label>
-        <label class="geoagent-bedrock-region-row" hidden>
-          Region
-          <input class="geoagent-bedrock-region" autocomplete="off" placeholder="us-west-2" />
-        </label>
-        <label class="geoagent-model-cell">
-          Model
-          <div class="geoagent-model-row">
-            <input class="geoagent-model-id" />
-            <button class="geoagent-load-models secondary" type="button">Load models</button>
-          </div>
-          <select class="geoagent-model-select" aria-label="Available models" hidden></select>
-        </label>
-        <div class="geoagent-config-note" aria-live="polite" hidden></div>
-      </div>
+      <details class="geoagent-settings">
+        <summary>Provider &amp; model</summary>
+        <div class="geoagent-settings-grid">
+          <label>
+            Provider
+            <select class="geoagent-provider"></select>
+          </label>
+          <label>
+            <span class="geoagent-api-key-label">API Key</span>
+            <input class="geoagent-api-key" type="password" autocomplete="off" placeholder="sk-..." />
+          </label>
+          <label class="geoagent-base-url-row" hidden>
+            API Base URL
+            <input class="geoagent-base-url" autocomplete="off" placeholder="https://host/v1" />
+          </label>
+          <label class="geoagent-bedrock-region-row" hidden>
+            Region
+            <input class="geoagent-bedrock-region" autocomplete="off" placeholder="us-west-2" />
+          </label>
+          <label class="geoagent-model-cell">
+            Model
+            <div class="geoagent-model-row">
+              <input class="geoagent-model-id" list="${this.modelListId}" autocomplete="off" />
+              <button class="geoagent-load-models secondary" type="button">Load models</button>
+            </div>
+            <datalist class="geoagent-model-list" id="${this.modelListId}"></datalist>
+          </label>
+          <div class="geoagent-config-note" aria-live="polite" hidden></div>
+        </div>
+      </details>
 
       <details class="geoagent-earth-engine">
         <summary>Earth Engine</summary>
@@ -655,13 +699,14 @@ export class GeoAgentControl implements IControl {
     panel.append(header, content, resizeHandleLeft, resizeHandleRight);
     this.ui = {
       status,
+      settingsDetails: this.requiredElement(content, '.geoagent-settings'),
       providerSelect: this.requiredElement(content, '.geoagent-provider'),
       apiKeyLabel: this.requiredElement(content, '.geoagent-api-key-label'),
       apiKeyInput: this.requiredElement(content, '.geoagent-api-key'),
       baseUrlLabel: this.requiredElement(content, '.geoagent-base-url-row'),
       baseUrlInput: this.requiredElement(content, '.geoagent-base-url'),
       modelIdInput: this.requiredElement(content, '.geoagent-model-id'),
-      modelSelect: this.requiredElement(content, '.geoagent-model-select'),
+      modelList: this.requiredElement(content, '.geoagent-model-list'),
       loadModelsButton: this.requiredElement(content, '.geoagent-load-models'),
       configNote: this.requiredElement(content, '.geoagent-config-note'),
       bedrockRegionLabel: this.requiredElement(content, '.geoagent-bedrock-region-row'),
@@ -835,14 +880,9 @@ export class GeoAgentControl implements IControl {
     ui.loadModelsButton.addEventListener('click', () => {
       void this.verifyAndLoadModels();
     });
-    ui.modelSelect.addEventListener('change', () => {
-      const modelId = ui.modelSelect.value;
-      if (!modelId) {
-        return;
-      }
-      ui.modelIdInput.value = modelId;
-      ui.modelIdInput.dispatchEvent(new Event('input', { bubbles: true }));
-    });
+    // The model field is a combobox: typing or picking a loaded model from the
+    // attached <datalist> both fire this `input` handler, so no separate
+    // dropdown listener is needed.
     ui.modelIdInput.addEventListener('input', () => {
       const modelId = ui.modelIdInput.value.trim();
       this.state.modelId = modelId;
@@ -1392,6 +1432,14 @@ export class GeoAgentControl implements IControl {
     this.ui.cancelButton.disabled = !this.state.busy || this.cancelRequested;
     this.ui.clearButton.disabled = this.state.busy;
     this.ui.copyButton.disabled = this.ui.log.childElementCount === 0;
+    // Fold the settings away the first time setup completes, so the chat gets
+    // more room. Only act on the not-configured -> configured edge: never
+    // auto-open, so a user who manually re-opens the section to tweak settings
+    // is not fought on the next refresh.
+    if (configured && !this.wasConfigured) {
+      this.ui.settingsDetails.open = false;
+    }
+    this.wasConfigured = configured;
     this.applyIdleStatus();
   }
 
@@ -1591,25 +1639,16 @@ export class GeoAgentControl implements IControl {
     if (!this.ui) {
       return;
     }
-    const select = this.ui.modelSelect;
-    select.replaceChildren();
-    if (!models.length) {
-      select.hidden = true;
-      return;
-    }
-    const placeholder = document.createElement('option');
-    placeholder.value = '';
-    placeholder.textContent = `Select a model (${models.length} available)`;
-    select.appendChild(placeholder);
+    // Loaded models become suggestions on the model field's attached <datalist>,
+    // so the single combobox input offers a dropdown while still accepting any
+    // typed value (custom endpoints, models the list misses).
+    const list = this.ui.modelList;
+    list.replaceChildren();
     for (const model of models) {
       const option = document.createElement('option');
       option.value = model;
-      option.textContent = model;
-      select.appendChild(option);
+      list.appendChild(option);
     }
-    const current = this.ui.modelIdInput.value.trim();
-    select.value = models.includes(current) ? current : '';
-    select.hidden = false;
   }
 
   private normalizeBaseUrl(baseUrl: string): string {
@@ -1643,9 +1682,13 @@ export class GeoAgentControl implements IControl {
     switch (provider.id) {
       case 'openai-responses':
       case 'openai-chat':
-        return this.fetchOpenAiModels('https://api.openai.com/v1', apiKey);
+        return this.fetchOpenAiModels('https://api.openai.com/v1', apiKey, true);
       case 'openai-compatible':
-        return this.fetchOpenAiModels(this.normalizeBaseUrl(baseUrl), apiKey);
+        return this.fetchOpenAiModels(
+          this.normalizeBaseUrl(baseUrl),
+          apiKey,
+          false,
+        );
       case 'anthropic':
         return this.fetchAnthropicModels(apiKey);
       case 'google':
@@ -1682,14 +1725,43 @@ export class GeoAgentControl implements IControl {
   private async fetchOpenAiModels(
     baseUrl: string,
     apiKey: string,
+    firstPartyOpenAi: boolean,
   ): Promise<string[]> {
     const json = (await this.fetchModelJson(`${baseUrl}/models`, {
       headers: { Authorization: `Bearer ${apiKey}` },
     })) as { data?: Array<{ id?: string }> };
-    return (json.data ?? [])
+    const ids = (json.data ?? [])
       .map((entry) => entry.id)
-      .filter((id): id is string => typeof id === 'string' && id.length > 0)
-      .sort();
+      .filter((id): id is string => typeof id === 'string' && id.length > 0);
+    return this.filterChatModels(ids, firstPartyOpenAi).sort();
+  }
+
+  /**
+   * Drop entries that are clearly not text chat models (embeddings, audio,
+   * image, moderation) so the picker only offers models the agent can run. For
+   * first-party OpenAI, also drop legacy completion families the chat/responses
+   * API cannot drive. Custom endpoints keep their own naming, so the legacy
+   * filter is not applied to them.
+   */
+  private filterChatModels(
+    ids: string[],
+    firstPartyOpenAi: boolean,
+  ): string[] {
+    return ids.filter((id) => {
+      const lower = id.toLowerCase();
+      if (NON_CHAT_MODEL_MARKERS.some((marker) => lower.includes(marker))) {
+        return false;
+      }
+      if (firstPartyOpenAi) {
+        if (lower.endsWith('-instruct')) {
+          return false;
+        }
+        if (OPENAI_LEGACY_MODEL_MARKERS.some((marker) => lower.includes(marker))) {
+          return false;
+        }
+      }
+      return true;
+    });
   }
 
   private async fetchAnthropicModels(apiKey: string): Promise<string[]> {
