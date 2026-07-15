@@ -1,6 +1,6 @@
 {
   "name": "maplibre-gl-geoagent",
-  "version": "0.5.4",
+  "version": "0.5.5",
   "description": "A browser-only GeoAgent MapLibre GL JS control with Strands agent tools",
   "type": "module",
   "main": "./dist/index.cjs",
@@ -100,7 +100,7 @@
     "vitest": "^2.1.0"
   },
   "dependencies": {
-    "@anthropic-ai/sdk": "^0.92.0",
+    "@anthropic-ai/sdk": "^0.111.0",
     "@google/earthengine": "^1.7.25",
     "@google/genai": "^1.52.0",
     "@strands-agents/sdk": "^1.1.0",
