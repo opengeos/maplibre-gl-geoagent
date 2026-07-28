@@ -1,12 +1,17 @@
 import { tool, type JSONValue, type Tool } from "@strands-agents/sdk";
-import maplibregl, {
-  type FilterSpecification,
-  type LayerSpecification,
-  type Map as MapLibreMap,
-  type MapGeoJSONFeature,
-  type ProjectionSpecification,
-  type SourceSpecification,
-  type StyleSpecification,
+// Namespace import, not a default one: MapLibre v6 is ESM-only and dropped its
+// default export. A namespace (rather than named imports) because
+// run_maplibre_script hands the whole MapLibre API to user-authored scripts,
+// so this module needs the namespace object itself.
+import * as maplibregl from "maplibre-gl";
+import type {
+  FilterSpecification,
+  LayerSpecification,
+  Map as MapLibreMap,
+  MapGeoJSONFeature,
+  ProjectionSpecification,
+  SourceSpecification,
+  StyleSpecification,
 } from "maplibre-gl";
 import { z } from "zod";
 import {
