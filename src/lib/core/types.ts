@@ -1,4 +1,5 @@
 import type { Map, StyleSpecification } from 'maplibre-gl';
+import type { GeoAgentMapEngine } from './maplibre-tools';
 import type { EarthEngineOptions } from './earth-engine';
 
 export type GeoAgentProviderId =
@@ -152,6 +153,17 @@ export interface GeoAgentControlOptions {
    * tools.
    */
   customSystemPrompt?: string;
+
+  /**
+   * The map library the map handed to `onAdd` came from.
+   *
+   * Almost every tool stays on the Style Spec surface `maplibre-gl` and
+   * `mapbox-gl` share; four cannot, and this is what keeps them honest. See
+   * {@link GeoAgentMapEngine}. Defaults to `maplibre-gl`, so existing hosts
+   * need not set it; a host rendering with Mapbox GL JS passes
+   * `{ kind: "mapbox", namespace: mapboxgl }`.
+   */
+  mapEngine?: GeoAgentMapEngine;
 }
 
 export interface GeoAgentState {

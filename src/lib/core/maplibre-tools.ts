@@ -32,12 +32,58 @@ interface GeoJsonLayerDefinition {
   paint: JsonObject;
 }
 
+/**
+ * The marker surface the tools drive. Both `maplibre-gl`'s and `mapbox-gl`'s
+ * `Marker` satisfy it, so either engine's class can build one.
+ */
+export interface GeoAgentMarker {
+  setLngLat(lngLat: [number, number]): GeoAgentMarker;
+  addTo(map: unknown): GeoAgentMarker;
+  setPopup(popup: unknown): GeoAgentMarker;
+  getElement(): HTMLElement;
+  remove(): unknown;
+}
+
+/** The popup surface the marker tool drives; again shared by both engines. */
+export interface GeoAgentPopup {
+  setText(text: string): GeoAgentPopup;
+}
+
+/**
+ * The map library the host's map came from.
+ *
+ * Almost every tool stays on the Style Spec surface `maplibre-gl` and
+ * `mapbox-gl` share, but four cannot: the marker tool builds the engine's
+ * `Marker` and `Popup` (MapLibre's read `map._camera.transform` and throw on a
+ * mapbox-gl map), `set_projection` and `get_map_state` speak the engine's
+ * projection shape (`{ type }` on MapLibre, a name string / `{ name }` on
+ * Mapbox), and `run_maplibre_script` hands user code the engine's namespace.
+ * Naming the engine once is what keeps those four honest.
+ *
+ * Defaults to `maplibre-gl`. A host rendering with Mapbox GL JS passes
+ * `{ kind: "mapbox", namespace: mapboxgl }`.
+ */
+export interface GeoAgentMapEngine {
+  /** Which library {@link namespace} is. */
+  kind: "maplibre" | "mapbox";
+  /**
+   * The library's own namespace. `Marker` and `Popup` are what the tools
+   * construct; the whole object is what `run_maplibre_script` hands to
+   * user-authored code, so it must be the real namespace, not a subset.
+   */
+  namespace: {
+    Marker: new (options?: { color?: string }) => GeoAgentMarker;
+    Popup: new (options?: Record<string, unknown>) => GeoAgentPopup;
+    [key: string]: unknown;
+  };
+}
+
 interface Overlay {
   kind: "geojson" | "raster" | "basemap" | "marker" | "native" | "gee";
   name: string;
   sourceIds: string[];
   layerIds: string[];
-  marker?: maplibregl.Marker;
+  marker?: GeoAgentMarker;
   data?: GeoJSON.GeoJSON;
   url?: string;
   style?: JsonObject;
@@ -367,7 +413,18 @@ export interface MapLibreAgentToolsOptions {
   allowDestructiveTools: () => boolean;
   earthEngine?: EarthEngineOptions;
   onStateDataChange?: (data: Record<string, unknown>) => void;
+  /**
+   * The map library `map` came from. Defaults to `maplibre-gl`; see
+   * {@link GeoAgentMapEngine}.
+   */
+  mapEngine?: GeoAgentMapEngine;
 }
+
+/** The default engine: this package's own `maplibre-gl`. */
+const MAPLIBRE_ENGINE: GeoAgentMapEngine = {
+  kind: "maplibre",
+  namespace: maplibregl as unknown as GeoAgentMapEngine["namespace"],
+};
 
 export class MapLibreAgentTools {
   private readonly map: MapLibreMap;
@@ -377,9 +434,11 @@ export class MapLibreAgentTools {
   private readonly onStateDataChange?: (data: Record<string, unknown>) => void;
   private readonly overlays = new globalThis.Map<string, Overlay>();
   private readonly earthEngine?: EarthEngineService;
+  private readonly engine: GeoAgentMapEngine;
 
   constructor(map: MapLibreMap, options: MapLibreAgentToolsOptions) {
     this.map = map;
+    this.engine = options.mapEngine ?? MAPLIBRE_ENGINE;
     this.basemaps = { ...DEFAULT_BASEMAPS, ...options.basemaps };
     this.allowCodeExecution = options.allowCodeExecution;
     this.allowDestructiveTools = options.allowDestructiveTools;
@@ -1055,13 +1114,16 @@ export class MapLibreAgentTools {
     if (command === "get_map_state") {
       const center = this.map.getCenter();
       const bounds = this.map.getBounds();
-      const projection = this.map.getProjection();
+      // Read both spellings: MapLibre reports `{ type }`, mapbox-gl `{ name }`.
+      const projection = this.map.getProjection() as
+        | { type?: string; name?: string }
+        | undefined;
       return {
         center: [center.lng, center.lat],
         zoom: this.map.getZoom(),
         bearing: this.map.getBearing(),
         pitch: this.map.getPitch(),
-        projection: projection?.type ?? "mercator",
+        projection: projection?.type ?? projection?.name ?? "mercator",
         bounds: {
           west: bounds.getWest(),
           south: bounds.getSouth(),
@@ -1102,7 +1164,13 @@ export class MapLibreAgentTools {
           `Unsupported projection: ${projection}. Use globe or mercator.`,
         );
       }
-      this.map.setProjection({ type: projection } as ProjectionSpecification);
+      // MapLibre takes `{ type }`; mapbox-gl takes a name string (or
+      // `{ name }`) and throws on the MapLibre shape.
+      this.map.setProjection(
+        this.engine.kind === "mapbox"
+          ? (projection as unknown as ProjectionSpecification)
+          : ({ type: projection } as ProjectionSpecification),
+      );
       return `Projection changed to ${projection}.`;
     }
 
@@ -2382,7 +2450,11 @@ export class MapLibreAgentTools {
       setSky?: (sky: JsonObject) => void;
     };
     if (typeof mapWithSky.setSky !== "function") {
-      throw new Error("Sky is not supported by this MapLibre version.");
+      throw new Error(
+        // mapbox-gl has no setSky at all (it draws sky through a style layer),
+        // so this is reachable on a Mapbox host as well as an old MapLibre.
+        "Sky is not supported by this map engine.",
+      );
     }
     mapWithSky.setSky(sky);
   }
@@ -2392,7 +2464,11 @@ export class MapLibreAgentTools {
       setSky?: (sky: undefined) => void;
     };
     if (typeof mapWithSky.setSky !== "function") {
-      throw new Error("Sky is not supported by this MapLibre version.");
+      throw new Error(
+        // mapbox-gl has no setSky at all (it draws sky through a style layer),
+        // so this is reachable on a Mapbox host as well as an old MapLibre.
+        "Sky is not supported by this map engine.",
+      );
     }
     mapWithSky.setSky(undefined);
   }
@@ -2645,7 +2721,10 @@ export class MapLibreAgentTools {
   private addMarkerOverlay(args: JsonObject): string {
     const name = stringArg(args, "name", `marker-${this.overlays.size + 1}`);
     this.removeOverlay(name);
-    const marker = new maplibregl.Marker({
+    // The host's engine, not this package's maplibre-gl: MapLibre's Marker
+    // reads `map._camera.transform` on every position update and throws on a
+    // mapbox-gl map.
+    const marker = new this.engine.namespace.Marker({
       color: stringArg(args, "color", "#3388ff"),
     })
       .setLngLat([numberArg(args, "lon"), numberArg(args, "lat")])
@@ -2654,7 +2733,7 @@ export class MapLibreAgentTools {
       stringArg(args, "tooltip") || stringArg(args, "popup") || name;
     const popup = stringArg(args, "popup");
     if (popup) {
-      marker.setPopup(new maplibregl.Popup().setText(popup));
+      marker.setPopup(new this.engine.namespace.Popup().setText(popup));
     }
     this.overlays.set(name, {
       kind: "marker",
@@ -2702,10 +2781,12 @@ export class MapLibreAgentTools {
       `"use strict"; return (async () => {\n${code}\n})()`,
     ) as (
       map: MapLibreMap,
-      maplibreglApi: typeof maplibregl,
+      mapEngineApi: GeoAgentMapEngine["namespace"],
       helpersArg: Record<string, unknown>,
     ) => Promise<unknown>;
-    const result = await fn(this.map, maplibregl, helpers);
+    // Hand user code the engine actually drawing the map, so a script that
+    // constructs a Marker or a LngLatBounds builds the right one.
+    const result = await fn(this.map, this.engine.namespace, helpers);
     return {
       success: true,
       message: description || "MapLibre script executed.",
