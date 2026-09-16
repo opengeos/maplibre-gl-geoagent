@@ -190,7 +190,7 @@ export class GeoAgentControl implements IControl {
     Omit<
       GeoAgentControlOptions,
       'defaultModel' | 'basemaps' | 'earthEngine' | 'apiKeys' | 'panelHeight'
-      | 'customTools' | 'customSystemPrompt'
+      | 'customTools' | 'customSystemPrompt' | 'mapEngine'
     >
   > &
     Pick<
@@ -202,6 +202,8 @@ export class GeoAgentControl implements IControl {
       | 'panelHeight'
       | 'customTools'
       | 'customSystemPrompt'
+      // No default: the tools fall back to this package's own maplibre-gl.
+      | 'mapEngine'
     >;
   private map?: MapLibreMap;
   private mapContainer?: HTMLElement;
@@ -300,6 +302,7 @@ export class GeoAgentControl implements IControl {
       allowCodeExecution: () => this.state.allowCodeExecution,
       allowDestructiveTools: () => this.state.allowDestructiveTools,
       earthEngine: this.options.earthEngine,
+      mapEngine: this.options.mapEngine,
       onStateDataChange: (data) => {
         this.state.data = { ...(this.state.data ?? {}), ...data };
         this.updateEarthEngineStatus();

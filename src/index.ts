@@ -11,6 +11,9 @@ export {
   toJsonValue,
   type BBox,
   type JsonObject,
+  type GeoAgentMapEngine,
+  type GeoAgentMarker,
+  type GeoAgentPopup,
 } from './lib/core/maplibre-tools';
 
 export type {

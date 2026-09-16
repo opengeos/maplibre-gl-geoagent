@@ -159,6 +159,36 @@ model ID exposed by that endpoint.
 | `showPermissionToggles`        | `boolean`                                                      | `false`               |
 | `basemaps`                     | `Record<string, string \| StyleSpecification>`                 | built-in basemaps     |
 | `earthEngine`                  | `EarthEngineOptions`                                           | `undefined`           |
+| `mapEngine`                    | `GeoAgentMapEngine`                                            | maplibre-gl           |
+
+### Running on Mapbox GL JS
+
+Almost every tool stays on the Style Spec surface `maplibre-gl` and `mapbox-gl`
+share. Four cannot, and naming the engine once is what keeps them honest:
+
+- `add_marker` builds the engine's `Marker` and `Popup` (MapLibre's read
+  `map._camera.transform` and throw on a mapbox-gl map),
+- `set_projection` writes MapLibre `{ type: 'globe' }` and Mapbox `'globe'`,
+- `get_map_state` reads `{ type }` or `{ name }`,
+- `run_maplibre_script` hands user-authored code the engine's own namespace.
+
+```javascript
+import mapboxgl from 'mapbox-gl';
+
+const agent = new GeoAgentControl({
+  mapEngine: { kind: 'mapbox', namespace: mapboxgl },
+});
+
+map.addControl(agent);
+```
+
+`namespace` must be the real library namespace, not a subset: `run_maplibre_script`
+passes the whole object to the script it runs. Omit `mapEngine` and the tools use
+this package's own `maplibre-gl`, exactly as before.
+
+One tool stays MapLibre-only either way: `set_sky` / `clear_sky` call
+`map.setSky`, which mapbox-gl does not have (it draws sky through a style
+layer). It reports that rather than failing silently.
 
 ### Earth Engine Options
 
