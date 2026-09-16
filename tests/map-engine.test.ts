@@ -188,3 +188,45 @@ describe('run_maplibre_script', () => {
     expect((result.result as Record<string, unknown>).tag).toBe('mapbox');
   });
 });
+
+describe('GeoAgentControl mapEngine plumbing', () => {
+  it('reaches the tools the control builds, not just the options object', async () => {
+    // The control copies its options field by field, so a new option that is
+    // declared but never copied typechecks and then silently does nothing: the
+    // tools fall back to maplibre-gl and every engine-specific tool breaks on a
+    // mapbox-gl map. Assert through the tools, which is what actually matters.
+    const { GeoAgentControl } = await import('../src/lib/core/GeoAgentControl');
+    const { FakeMarker } = fakeMarkerClass();
+    const engine = mapboxEngine(FakeMarker);
+
+    const control = new GeoAgentControl({ mapEngine: engine });
+    const container = document.createElement('div');
+    document.body.appendChild(container);
+    const map = {
+      getContainer: () => container,
+      on: vi.fn(),
+      off: vi.fn(),
+    };
+    control.onAdd(map as never);
+
+    const tools = (control as unknown as { tools?: { engine?: unknown } }).tools;
+    expect(tools?.engine).toBe(engine);
+
+    control.onRemove();
+    container.remove();
+  });
+
+  it('still defaults to maplibre-gl when no engine is named', async () => {
+    const { GeoAgentControl } = await import('../src/lib/core/GeoAgentControl');
+    const control = new GeoAgentControl({});
+    const container = document.createElement('div');
+    document.body.appendChild(container);
+    control.onAdd({ getContainer: () => container, on: vi.fn(), off: vi.fn() } as never);
+
+    const tools = (control as unknown as { tools?: { engine?: { kind?: string } } }).tools;
+    expect(tools?.engine?.kind).toBe('maplibre');
+
+    control.onRemove();
+    container.remove();
+  });
+});

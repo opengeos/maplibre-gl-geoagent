@@ -271,6 +271,7 @@ export class GeoAgentControl implements IControl {
       earthEngine: options.earthEngine,
       customTools: options.customTools,
       customSystemPrompt: options.customSystemPrompt,
+      mapEngine: options.mapEngine,
     };
     const providerId = this.initialProviderId();
     this.state = {
